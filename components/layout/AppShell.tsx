@@ -17,6 +17,7 @@ const navItems = [
 const playerNavItems = [
   { label: "Player Dashboard", href: "/player" },
   { label: "Find a Team", href: "/player/find-team" },
+  { label: "Applications", href: "/player/applications" },
   { label: "My Profile", href: "/player/profile" },
 ];
 
@@ -24,6 +25,7 @@ const teamNavItems = [
   { label: "Team Dashboard", href: "/team" },
   { label: "Find Players", href: "/team/find-players" },
   { label: "My Opportunities", href: "/team/opportunities" },
+  { label: "Applications", href: "/team/applications" },
   { label: "Team Profile", href: "/team/profile" },
 ];
 

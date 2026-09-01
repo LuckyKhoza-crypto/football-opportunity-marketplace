@@ -9,9 +9,9 @@ export default withAuth(
 
     // Route context detection
     // Player management routes
-    const playerRoutes = ["/player", "/player/onboarding", "/player/profile", "/player/find-team"];
+    const playerRoutes = ["/player", "/player/onboarding", "/player/profile", "/player/find-team", "/player/applications"];
     // Team management routes
-    const teamRoutes = ["/team", "/team/onboarding", "/team/profile", "/team/opportunities", "/team/find-players", "/team/players"];
+    const teamRoutes = ["/team", "/team/onboarding", "/team/profile", "/team/opportunities", "/team/find-players", "/team/players", "/team/applications"];
 
     const isPlayerRoute = playerRoutes.some((r) => pathname === r || pathname.startsWith(r + "/"));
     const isTeamRoute = teamRoutes.some((r) => pathname === r || pathname.startsWith(r + "/"));

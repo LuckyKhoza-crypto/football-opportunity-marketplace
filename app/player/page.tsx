@@ -14,11 +14,13 @@ import {
   PLAYING_LEVEL_LABELS,
   PREFERRED_FOOT_LABELS,
   AVAILABILITY_LABELS,
+  APPLICATION_STATUS_LABELS,
+  ACTIVE_APPLICATION_STATUSES,
   type PlayerProfile,
   type Position,
   type Opportunity,
 } from "@/types";
-import { MapPin, Target, Users, ArrowRight, UserPlus, Swords } from "lucide-react";
+import { MapPin, Target, Users, ArrowRight, UserPlus, Swords, FileText, Inbox } from "lucide-react";
 
 function formatPositions(positions: Position[]): string {
   return positions.join(" / ");
@@ -297,6 +299,24 @@ export default async function PlayerDashboardPage() {
                   >
                     <ArrowRight className="mr-2 h-4 w-4" />
                     Find a Team
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+
+            {/* Applications Overview */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <FileText className="h-4 w-4" />
+                  Applications
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Link href="/player/applications">
+                  <Button variant="outline" className="w-full justify-start">
+                    <Inbox className="mr-2 h-4 w-4" />
+                    View Applications
                   </Button>
                 </Link>
               </CardContent>

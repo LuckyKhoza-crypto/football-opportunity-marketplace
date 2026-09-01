@@ -14,13 +14,13 @@ export type RouteContext = "player" | "team" | "public" | "neutral";
  * Player management route prefixes.
  * Visiting these establishes Player View.
  */
-const PLAYER_MGMT_PREFIXES = ["/player", "/player/onboarding", "/player/profile", "/player/find-team"];
+const PLAYER_MGMT_PREFIXES = ["/player", "/player/onboarding", "/player/profile", "/player/find-team", "/player/applications"];
 
 /**
  * Team management route prefixes.
  * Visiting these establishes Team View.
  */
-const TEAM_MGMT_PREFIXES = ["/team", "/team/onboarding", "/team/profile", "/team/opportunities", "/team/find-players", "/team/players"];
+const TEAM_MGMT_PREFIXES = ["/team", "/team/onboarding", "/team/profile", "/team/opportunities", "/team/find-players", "/team/players", "/team/applications"];
 
 /**
  * Public resource route prefixes.

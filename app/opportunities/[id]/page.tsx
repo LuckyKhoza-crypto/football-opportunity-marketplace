@@ -16,6 +16,7 @@ import {
   type PlayerProfile,
 } from "@/types";
 import { MatchDetails } from "@/components/marketplace/match-details";
+import { ApplyButtonWrapper } from "@/features/applications/components/ApplyButtonWrapper";
 import {
   ArrowLeft,
   MapPin,
@@ -406,6 +407,16 @@ export default async function OpportunityDetailPage({ params }: PageProps) {
 
           {/* Sidebar - Team Info */}
           <div className="space-y-6">
+            {/* Apply Button */}
+            <Card>
+              <CardContent className="p-4">
+                <ApplyButtonWrapper
+                  opportunityId={opp.id}
+                  opportunityTitle={opp.title}
+                />
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
