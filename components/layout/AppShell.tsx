@@ -6,6 +6,7 @@ import { useState, useRef, useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useAppView } from "@/lib/use-app-view";
 import { Button } from "@/components/ui/button";
+import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -16,6 +17,8 @@ const navItems = [
 const playerNavItems = [
   { label: "Find a Team", href: "/player/find-team" },
   { label: "Applications", href: "/player/applications" },
+  { label: "Messages", href: "/messages" },
+  { label: "Notifications", href: "/notifications" },
   { label: "My Profile", href: "/player/profile" },
 ];
 
@@ -23,6 +26,8 @@ const teamNavItems = [
   { label: "Find Players", href: "/team/find-players" },
   { label: "My Opportunities", href: "/team/opportunities" },
   { label: "Applications", href: "/team/applications" },
+  { label: "Messages", href: "/messages" },
+  { label: "Notifications", href: "/notifications" },
   { label: "My Profile", href: "/team/profile" },
 ];
 
@@ -150,7 +155,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {/* Auth Area */}
           <div className="flex items-center gap-2">
             {session?.user ? (
-              <div className="relative" ref={accountMenuRef}>
+              <>
+                <NotificationBell />
+                <div className="relative" ref={accountMenuRef}>
                 <button
                   onClick={() => setAccountMenuOpen(!accountMenuOpen)}
                   className="flex items-center gap-2 rounded-full p-1 transition-colors hover:bg-accent"
@@ -227,7 +234,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     </button>
                   </div>
                 )}
-              </div>
+                </div>
+              </>
             ) : (
               <>
                 <Link href="/login">

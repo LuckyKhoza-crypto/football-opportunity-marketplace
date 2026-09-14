@@ -19,6 +19,7 @@ import {
   LogIn,
   UserPlus,
   UserX,
+  MessageSquare,
 } from "lucide-react";
 
 interface ApplyButtonProps {
@@ -254,6 +255,12 @@ export function ApplyButton({ opportunityId, opportunityTitle }: ApplyButtonProp
               </p>
             </div>
           </div>
+          <Link href="/messages" className="mt-3 block">
+            <Button size="sm" variant="outline" className="w-full">
+              <MessageSquare className="mr-2 h-4 w-4" />
+              Message Team
+            </Button>
+          </Link>
         </CardContent>
       </Card>
     );

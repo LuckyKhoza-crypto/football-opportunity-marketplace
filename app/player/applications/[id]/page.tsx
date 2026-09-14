@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MatchDetails } from "@/components/marketplace/match-details";
 import { ApplicationDetailClient } from "./ApplicationDetailClient";
+import { MessageButton } from "@/components/messaging/MessageButton";
 import {
   APPLICATION_STATUS_LABELS,
   APPLICATION_STATUS_COLORS,
@@ -523,6 +524,12 @@ export default async function ApplicationDetailPage({ params }: PageProps) {
                 </Button>
               </Link>
             )}
+            {/* Message Team button — get_or_create_conversation */}
+            <MessageButton
+              applicationId={application.id}
+              label="Message Team"
+              variant="default"
+            />
             <Link href="/player/applications">
               <Button variant="ghost">
                 <ArrowLeft className="mr-2 h-4 w-4" />

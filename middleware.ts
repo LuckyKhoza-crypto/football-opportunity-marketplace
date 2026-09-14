@@ -12,6 +12,8 @@ export default withAuth(
     const playerRoutes = ["/player", "/player/onboarding", "/player/profile", "/player/find-team", "/player/applications"];
     // Team management routes
     const teamRoutes = ["/team", "/team/onboarding", "/team/profile", "/team/opportunities", "/team/find-players", "/team/players", "/team/applications"];
+    // Messages are accessible by both roles
+    const messageRoutes = ["/messages"];
 
     const isPlayerRoute = playerRoutes.some((r) => pathname === r || pathname.startsWith(r + "/"));
     const isTeamRoute = teamRoutes.some((r) => pathname === r || pathname.startsWith(r + "/"));
@@ -79,6 +81,8 @@ export default withAuth(
           "/player",
           "/team",
           "/onboarding",
+          "/messages",
+          "/notifications",
         ];
 
         const isProtectedRoute = protectedRoutes.some((route) =>
@@ -109,5 +113,7 @@ export const config = {
     "/players/:path*",
     "/teams/:path*",
     "/opportunities/:path*",
+    "/messages/:path*",
+    "/notifications/:path*",
   ],
 };
