@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { emitToUser } from "@/lib/realtime-broadcast";
 
 // PATCH /api/notifications/read-all — Mark all of the user's notifications as read
 export async function PATCH() {
@@ -31,6 +32,9 @@ export async function PATCH() {
         { status: 500 },
       );
     }
+
+    // Broadcast the read-all event so all UI components stay in sync
+    emitToUser(userId, "notifications_read_all", {}).catch(() => {});
 
     return NextResponse.json({
       success: true,

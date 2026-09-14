@@ -67,6 +67,15 @@ vi.mock("@/lib/notifications", () => ({
   createNotification: vi.fn(),
 }));
 
+vi.mock("@/lib/realtime-broadcast", () => ({
+  emitToUser: vi.fn(),
+  emitToConversation: vi.fn(),
+  signChannel: vi.fn(),
+  verifySignedChannel: vi.fn(),
+  getUserChannelName: vi.fn(),
+  getConversationChannelName: vi.fn(),
+}));
+
 import { getServerSession } from "next-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createNotification } from "@/lib/notifications";

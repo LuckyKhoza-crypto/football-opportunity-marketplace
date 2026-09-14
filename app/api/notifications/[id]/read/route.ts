@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { emitToUser } from "@/lib/realtime-broadcast";
 
 // PATCH /api/notifications/[id]/read — Mark one notification as read
 export async function PATCH(
@@ -56,6 +57,12 @@ export async function PATCH(
         { status: 500 },
       );
     }
+
+    // Broadcast the read state change so all UI components stay in sync
+    emitToUser(userId, "notification_read", {
+      id,
+      readAt: new Date().toISOString(),
+    }).catch(() => {});
 
     return NextResponse.json({ success: true });
   } catch (err) {

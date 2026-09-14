@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { emitToUser } from "@/lib/realtime-broadcast";
 
 export type NotificationType =
   | "application_received"
@@ -55,6 +56,23 @@ export async function createNotification({
     }
     console.error("Failed to create notification:", error);
     return { data: null, error, deduplicated: false };
+  }
+
+  // Emit realtime event for the recipient
+  if (data) {
+    await emitToUser(userId, "notification_new", {
+      id: data.id,
+      user_id: userId,
+      type,
+      title,
+      body,
+      link: link ?? null,
+      source_id: sourceId ?? null,
+      read_at: null,
+      created_at: new Date().toISOString(),
+    }).catch(() => {
+      // Realtime broadcast is best-effort; don't fail notification creation
+    });
   }
 
   return { data, error: null, deduplicated: false };

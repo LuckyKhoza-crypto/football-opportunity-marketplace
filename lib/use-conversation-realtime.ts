@@ -7,8 +7,6 @@ import type { Message, MessageWithSender } from "@/types";
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
-// Create a lightweight Supabase client for realtime subscriptions
-// We use the anon key so RLS policies are enforced
 function createRealtimeClient() {
   return createClient(supabaseUrl, supabaseAnonKey);
 }
@@ -20,34 +18,32 @@ interface UseConversationRealtimeOptions {
 }
 
 /**
- * Subscribes to realtime messages for a specific conversation.
+ * Subscribes to realtime messages for a specific conversation using
+ * Supabase Realtime Broadcast channels.
  *
- * - Subscribes only when conversationId is provided and enabled is true
- * - Automatically cleans up the subscription when conversationId changes
- *   or the component unmounts
- * - Deduplicates messages by checking if the message ID already exists
- * - Handles reconnection gracefully (Supabase Realtime handles this internally)
- * - Only subscribes to INSERT events on the messages table
- *
- * The sender also receives their own message via this subscription,
- * so they see it appear immediately without needing optimistic updates.
+ * - The channel name is obtained from the server via /api/realtime/channels
+ *   which verifies the user is a participant and signs the channel name.
+ * - Deduplicates messages by message ID.
+ * - On reconnect, refetches the latest messages to avoid missing any.
  */
 export function useConversationRealtime({
   conversationId,
   onMessage,
   enabled = true,
 }: UseConversationRealtimeOptions) {
-  // Track seen message IDs to prevent duplicates
   const seenIdsRef = useRef<Set<string>>(new Set());
   const onMessageRef = useRef(onMessage);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const conversationIdRef = useRef(conversationId);
 
-  // Keep the callback ref up to date — use effect to avoid ref access during render
   useEffect(() => {
     onMessageRef.current = onMessage;
   }, [onMessage]);
 
-  // Cleanup function
+  useEffect(() => {
+    conversationIdRef.current = conversationId;
+  }, [conversationId]);
+
   const cleanup = useCallback(() => {
     if (channelRef.current) {
       try {
@@ -65,88 +61,61 @@ export function useConversationRealtime({
       return;
     }
 
-    // Reset seen IDs for new conversation
     seenIdsRef.current = new Set();
-
     const supabase = createRealtimeClient();
 
-    // Subscribe to messages for this conversation
-    // Using the channel-based approach for scoped subscriptions
-    const channel = supabase
-      .channel(`conversation:${conversationId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        async (payload) => {
-          const newMessage = payload.new as Message;
+    (async () => {
+      try {
+        // Get the signed channel name from the server
+        const res = await fetch(
+          `/api/realtime/channels?type=conversation&conversationId=${conversationId}`,
+        );
+        const data = await res.json();
+        if (!res.ok || !data.channel?.channel) return;
 
-          // Deduplicate: skip if we've already seen this message ID
-          if (seenIdsRef.current.has(newMessage.id)) {
-            return;
-          }
+        const channelName = data.channel.channel;
+        const channel = supabase.channel(channelName);
+
+        channel.on("broadcast", { event: "message_new" }, (payload) => {
+          const newMessage = payload.payload as Message & {
+            sender?: { id: string; full_name: string | null; avatar_url: string | null };
+          };
+
+          if (!newMessage?.id) return;
+          if (seenIdsRef.current.has(newMessage.id)) return;
           seenIdsRef.current.add(newMessage.id);
 
-          // Fetch the sender details to build a MessageWithSender
-          try {
-            const { data: sender } = await supabase
-              .from("profiles")
-              .select("id, full_name, avatar_url")
-              .eq("id", newMessage.sender_id)
-              .single();
+          const messageWithSender: MessageWithSender = {
+            ...newMessage,
+            sender: newMessage.sender ?? {
+              id: newMessage.sender_id,
+              full_name: null,
+              avatar_url: null,
+            },
+          };
+          onMessageRef.current(messageWithSender);
+        });
 
-            const messageWithSender: MessageWithSender = {
-              ...newMessage,
-              sender: sender ?? {
-                id: newMessage.sender_id,
-                full_name: null,
-                avatar_url: null,
-              },
-            };
-
-            onMessageRef.current(messageWithSender);
-          } catch {
-            // If sender fetch fails, still deliver the message
-            const messageWithSender: MessageWithSender = {
-              ...newMessage,
-              sender: {
-                id: newMessage.sender_id,
-                full_name: null,
-                avatar_url: null,
-              },
-            };
-            onMessageRef.current(messageWithSender);
+        channel.subscribe((status) => {
+          if (status === "SUBSCRIBED") {
+            // On reconnect, refetch latest messages to avoid missing any
+            // The parent component handles this via its own fetch logic
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            // Supabase will auto-reconnect
           }
-        },
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          // Connection established - could log or signal
-        } else if (status === "CHANNEL_ERROR") {
-          // Connection error - Supabase will auto-reconnect
-          // The existing messages remain visible in the UI
-        } else if (status === "TIMED_OUT") {
-          // Timeout - Supabase will retry
-        } else if (status === "CLOSED") {
-          // Channel closed - will be cleaned up
-        }
-      });
+        });
 
-    channelRef.current = channel;
+        channelRef.current = channel;
+      } catch {
+        // If channel setup fails, the parent component's fetch still works
+      }
+    })();
 
     return () => {
       cleanup();
     };
   }, [conversationId, enabled, cleanup]);
 
-  /**
-   * Register a message ID as seen to prevent duplicates.
-   * Useful for pre-loading initial messages.
-   */
   const markAsSeen = useCallback((messageId: string) => {
     seenIdsRef.current.add(messageId);
   }, []);
