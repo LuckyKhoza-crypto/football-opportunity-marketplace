@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { matchPlayerToOpportunity } from "@/lib/matching";
+import { createNotification } from "@/lib/notifications";
 import type { PlayerProfile, Opportunity } from "@/types";
 import type { MatchQuality } from "@/lib/matching";
 
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
     // Verify the opportunity exists and is active
     const { data: opportunity } = await supabaseAdmin
       .from("opportunities")
-      .select("id, team_id, status")
+      .select("id, team_id, status, title")
       .eq("id", opportunity_id)
       .single();
 
@@ -106,26 +107,90 @@ export async function POST(request: Request) {
       );
     }
 
-    // Create the application
-    const { data: application, error: insertError } = await supabaseAdmin
-      .from("applications")
-      .insert({
-        opportunity_id,
-        player_profile_id: playerProfile.id,
-        cover_message: cover_message?.trim() || null,
-      })
-      .select()
-      .single();
+    // Create the application, conversation, and participants atomically
+    // using the PostgreSQL RPC function
+    const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc(
+      "create_application_with_conversation",
+      {
+        p_opportunity_id: opportunity_id,
+        p_player_profile_id: playerProfile.id,
+        p_cover_message: cover_message?.trim() || null,
+        p_user_id: session.user.id,
+      },
+    );
 
-    if (insertError) {
-      console.error("Failed to create application:", insertError);
+    if (rpcError || !rpcResult?.success) {
+      console.error("Failed to create application:", rpcError ?? rpcResult?.error);
       return NextResponse.json(
-        { error: "Failed to submit application" },
+        { error: rpcResult?.error ?? "Failed to submit application" },
         { status: 500 },
       );
     }
 
-    return NextResponse.json({ success: true, application }, { status: 201 });
+    // ─── Notification: New application received ─────────────────
+    // Notify the team responsible for the opportunity.
+    // Only after the application has been successfully created.
+    try {
+      // Fetch the player's full name for the notification body
+      const { data: playerProfileData } = await supabaseAdmin
+        .from("profiles")
+        .select("full_name")
+        .eq("id", session.user.id)
+        .single();
+
+      const playerName = playerProfileData?.full_name ?? "A player";
+      const opportunityTitle = opportunity.title ?? "your opportunity";
+
+      if (teamProfile?.user_id) {
+        await createNotification({
+          userId: teamProfile.user_id,
+          type: "application_received",
+          title: "New application",
+          body: `${playerName} applied for your ${opportunityTitle} opportunity.`,
+          link: "/team/applications",
+          sourceId: rpcResult.application_id,
+        });
+      }
+    } catch (notifErr) {
+      // Notification failure should not fail the application creation
+      console.error("Failed to create application notification:", notifErr);
+    }
+
+    // Fetch the created application with details for the response
+    const { data: application } = await supabaseAdmin
+      .from("applications")
+      .select(`
+        id,
+        opportunity_id,
+        player_profile_id,
+        status,
+        cover_message,
+        created_at,
+        updated_at,
+        opportunity:opportunity_id (
+          id,
+          title,
+          position,
+          playing_level,
+          location,
+          team:team_id (
+            id,
+            team_name,
+            logo_url
+          )
+        )
+      `)
+      .eq("id", rpcResult.application_id)
+      .single();
+
+    return NextResponse.json(
+      {
+        success: true,
+        application,
+        conversation_id: rpcResult.conversation_id,
+      },
+      { status: 201 },
+    );
   } catch (err) {
     console.error("Application creation error:", err);
     return NextResponse.json(

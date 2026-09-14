@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { createNotification } from "@/lib/notifications";
+import { APPLICATION_STATUS_LABELS } from "@/types";
 import type { ApplicationStatus } from "@/types";
 
 // Valid status transitions
@@ -177,8 +179,10 @@ export async function PATCH(
         *,
         opportunity:opportunity_id (
           team_id,
+          title,
           team:team_id (
-            user_id
+            user_id,
+            team_name
           )
         ),
         player_profile:player_profile_id (
@@ -254,6 +258,26 @@ export async function PATCH(
         { error: "Failed to update application" },
         { status: 500 },
       );
+    }
+
+    // ─── Notification: Application status changed ───────────────
+    // Notify the player when their application status changes.
+    // Only after the status has been successfully updated.
+    try {
+      const opportunityTitle = application.opportunity?.title ?? "your application";
+      const teamName = application.opportunity?.team?.team_name ?? "the team";
+      const statusLabel = APPLICATION_STATUS_LABELS[newStatus as ApplicationStatus] ?? newStatus;
+
+      await createNotification({
+        userId: application.player_profile?.user_id,
+        type: "application_status_changed",
+        title: "Application updated",
+        body: `Your application for ${opportunityTitle} at ${teamName} is now ${statusLabel}.`,
+        link: `/player/applications/${id}`,
+      });
+    } catch (notifErr) {
+      // Notification failure should not fail the status change
+      console.error("Failed to create status change notification:", notifErr);
     }
 
     return NextResponse.json({ success: true, application: updated });

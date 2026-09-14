@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MatchDetails } from "@/components/marketplace/match-details";
+import { MessageButton } from "@/components/messaging/MessageButton";
 import {
   APPLICATION_STATUS_LABELS,
   APPLICATION_STATUS_COLORS,
@@ -1183,6 +1184,14 @@ export function TeamApplicationsClient() {
                                 </a>
                               </div>
                             )}
+
+                            {/* Message Player */}
+                            <MessageButton
+                              applicationId={app.id}
+                              label="Message Player"
+                              variant="default"
+                              size="sm"
+                            />
 
                             {/* View Full Profile */}
                             <Link href={`/players/${profile.id}`}>

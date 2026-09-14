@@ -401,3 +401,103 @@ export const APPLICATION_STATUS_DESCRIPTIONS: Record<ApplicationStatus, string> 
 
 export const ACTIVE_APPLICATION_STATUSES: ApplicationStatus[] = ["pending", "reviewing"];
 export const PAST_APPLICATION_STATUSES: ApplicationStatus[] = ["accepted", "rejected", "withdrawn"];
+
+// ─── Messaging ──────────────────────────────────────────────────
+
+export interface Conversation {
+  id: string;
+  application_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationParticipant {
+  id: string;
+  conversation_id: string;
+  user_id: string;
+  last_read_at: string;
+  created_at: string;
+}
+
+export interface Message {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MessageWithSender extends Message {
+  sender: {
+    id: string;
+    full_name: string | null;
+    avatar_url: string | null;
+  };
+}
+
+// ─── Notifications ─────────────────────────────────────────────
+
+export type NotificationType =
+  | "application_received"
+  | "application_status_changed"
+  | "message_received";
+
+export interface AppNotification {
+  id: string;
+  user_id: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  link: string | null;
+  source_id: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+// ─── Messaging ─────────────────────────────────────────────────
+
+export interface ConversationWithDetails {
+  id: string;
+  application_id: string;
+  created_at: string;
+  updated_at: string;
+  participants: {
+    user_id: string;
+    last_read_at: string;
+    user: {
+      id: string;
+      full_name: string | null;
+      avatar_url: string | null;
+    };
+  }[];
+  latest_message: {
+    id: string;
+    body: string;
+    sender_id: string;
+    created_at: string;
+  } | null;
+  unread_count: number;
+  application: {
+    id: string;
+    status: ApplicationStatus;
+    opportunity: {
+      id: string;
+      title: string;
+      position: string | null;
+      playing_level: string | null;
+      location: string | null;
+      team: {
+        id: string;
+        team_name: string;
+        logo_url: string | null;
+      };
+    };
+    player_profile: {
+      id: string;
+      profile_photo_url: string | null;
+      full_name: string | null;
+      positions: string[];
+    };
+  };
+}
