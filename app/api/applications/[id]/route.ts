@@ -3,13 +3,13 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createNotification } from "@/lib/notifications";
-import { APPLICATION_STATUS_LABELS } from "@/types";
+import { APPLICATION_STATUS_LABELS, POSITION_LABELS } from "@/types";
 import type { ApplicationStatus } from "@/types";
 
 // Valid status transitions
 const VALID_TRANSITIONS: Record<string, string[]> = {
-  pending: ["reviewing", "rejected", "accepted"],
-  reviewing: ["rejected", "accepted"],
+  pending: ["reviewing", "rejected", "accepted", "withdrawn"],
+  reviewing: ["rejected", "accepted", "withdrawn"],
   accepted: [],
   rejected: [],
   withdrawn: [],
@@ -266,13 +266,33 @@ export async function PATCH(
     try {
       const opportunityTitle = application.opportunity?.title ?? "your application";
       const teamName = application.opportunity?.team?.team_name ?? "the team";
-      const statusLabel = APPLICATION_STATUS_LABELS[newStatus as ApplicationStatus] ?? newStatus;
+      const positionLabel = application.opportunity?.position
+        ? (POSITION_LABELS[application.opportunity.position] ?? application.opportunity.position)
+        : "your position";
+
+      let body: string;
+      switch (newStatus) {
+        case "accepted":
+          body = `${teamName} has accepted your application for ${positionLabel}.`;
+          break;
+        case "rejected":
+          body = `${teamName} has declined your application for ${positionLabel}.`;
+          break;
+        case "reviewing":
+          body = `${teamName} is currently reviewing your application for ${positionLabel}.`;
+          break;
+        case "withdrawn":
+          body = `You withdrew your application for ${positionLabel} at ${teamName}.`;
+          break;
+        default:
+          body = `Your application for ${opportunityTitle} at ${teamName} is now ${APPLICATION_STATUS_LABELS[newStatus as ApplicationStatus] ?? newStatus}.`;
+      }
 
       await createNotification({
         userId: application.player_profile?.user_id,
         type: "application_status_changed",
         title: "Application updated",
-        body: `Your application for ${opportunityTitle} at ${teamName} is now ${statusLabel}.`,
+        body,
         link: `/player/applications/${id}`,
       });
     } catch (notifErr) {

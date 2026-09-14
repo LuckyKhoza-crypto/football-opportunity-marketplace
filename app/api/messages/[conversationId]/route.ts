@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { createNotification } from "@/lib/notifications";
+import { emitToConversation } from "@/lib/realtime-broadcast";
 
 const MESSAGE_LIMIT = 50;
 const MAX_MESSAGE_LENGTH = 5000;
@@ -51,11 +52,40 @@ export async function GET(
       .select(`
         id,
         application_id,
+        outreach_id,
         created_at,
         updated_at,
         application:application_id (
           id,
           status,
+          opportunity:opportunity_id (
+            id,
+            title,
+            position,
+            playing_level,
+            location,
+            team:team_id (
+              id,
+              team_name,
+              logo_url,
+              location,
+              league,
+              playing_level
+            )
+          ),
+          player_profile:player_profile_id (
+            id,
+            profile_photo_url,
+            user_id,
+            positions,
+            playing_level,
+            location
+          )
+        ),
+        outreach:outreach_id (
+          id,
+          status,
+          initial_message,
           opportunity:opportunity_id (
             id,
             title,
@@ -291,6 +321,18 @@ export async function POST(
       );
     }
 
+    // ─── Realtime broadcast: new message ───────────────────────
+    try {
+      await emitToConversation(conversationId, "message_new", {
+        ...message,
+        sender: message.sender ?? null,
+      }).catch(() => {
+        // Broadcast is best-effort
+      });
+    } catch {
+      // Ignore broadcast errors
+    }
+
     // ─── Notification: New message received ─────────────────────
     // Notify the OTHER participant in the conversation.
     // The sender never receives a notification for their own message.
@@ -313,15 +355,28 @@ export async function POST(
             player_profile:player_profile_id (
               user_id
             )
+          ),
+          outreach:outreach_id (
+            opportunity:opportunity_id (
+              team:team_id (
+                user_id,
+                team_name
+              )
+            ),
+            player_profile:player_profile_id (
+              user_id
+            )
           )
         `)
         .eq("id", conversationId)
         .single();
 
       const application = conversationData?.application as any;
-      const teamUserId = application?.opportunity?.[0]?.team?.[0]?.user_id;
-      const teamName = application?.opportunity?.[0]?.team?.[0]?.team_name;
-      const playerUserId = application?.player_profile?.[0]?.user_id;
+      const outreach = conversationData?.outreach as any;
+      const appOrOutreach = application ?? outreach;
+      const teamUserId = appOrOutreach?.opportunity?.[0]?.team?.[0]?.user_id;
+      const teamName = appOrOutreach?.opportunity?.[0]?.team?.[0]?.team_name;
+      const playerUserId = appOrOutreach?.player_profile?.[0]?.user_id;
 
       // Determine the sender's display name
       let senderName: string | null = null;

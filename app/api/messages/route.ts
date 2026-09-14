@@ -25,9 +25,31 @@ export async function GET(request: Request) {
         conversation:conversation_id (
           id,
           application_id,
+          outreach_id,
           created_at,
           updated_at,
           application:application_id (
+            id,
+            status,
+            opportunity:opportunity_id (
+              id,
+              title,
+              position,
+              playing_level,
+              location,
+              team:team_id (
+                id,
+                team_name,
+                logo_url
+              )
+            ),
+            player_profile:player_profile_id (
+              id,
+              profile_photo_url,
+              user_id
+            )
+          ),
+          outreach:outreach_id (
             id,
             status,
             opportunity:opportunity_id (
@@ -106,7 +128,10 @@ export async function GET(request: Request) {
 
     // Fetch player profile names for the other participant display
     const playerProfileIds = (participants as any[])
-      .map((p: any) => p.conversation?.application?.player_profile?.user_id)
+      .map((p: any) =>
+        p.conversation?.application?.player_profile?.user_id ??
+        p.conversation?.outreach?.player_profile?.user_id
+      )
       .filter(Boolean);
 
     const { data: playerProfiles } = await supabaseAdmin
@@ -125,8 +150,10 @@ export async function GET(request: Request) {
     const conversations = (participants as any[]).map((p: any) => {
       const conversation = p.conversation || {};
       const application = conversation.application || {};
-      const opportunity = application.opportunity || {};
-      const playerProfile = application.player_profile || {};
+      const outreach = conversation.outreach || {};
+      const appOrOutreach = application.id ? application : outreach;
+      const opportunity = appOrOutreach.opportunity || {};
+      const playerProfile = appOrOutreach.player_profile || {};
       const latestMsg = latestMessageMap.get(p.conversation_id) ?? null;
 
       // Get the other participant's name
@@ -142,6 +169,7 @@ export async function GET(request: Request) {
       return {
         id: conversation.id,
         application_id: conversation.application_id,
+        outreach_id: conversation.outreach_id,
         created_at: conversation.created_at,
         updated_at: conversation.updated_at,
         display_name:
@@ -150,7 +178,7 @@ export async function GET(request: Request) {
           "Unknown",
         opportunity_title: opportunity?.title ?? "Unknown Opportunity",
         opportunity_position: opportunity?.position,
-        application_status: application?.status ?? "pending",
+        application_status: appOrOutreach?.status ?? "pending",
         latest_message: latestMsg,
         unread_count: unreadCountMap.get(p.conversation_id) ?? 0,
         other_participant: otherParticipantProfile,

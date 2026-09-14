@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import {
   MessageSquare,
   CheckCheck,
 } from "lucide-react";
+import { useNotifications } from "@/lib/use-notifications";
 import type { AppNotification, NotificationType } from "@/types";
 
 function formatRelativeTime(dateStr: string): string {
@@ -64,58 +65,24 @@ function getIconColor(type: NotificationType): string {
 
 export function NotificationsClient() {
   const router = useRouter();
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
-
-  const fetchNotifications = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const res = await fetch("/api/notifications");
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(data.error || "Failed to fetch notifications");
-        return;
-      }
-
-      setNotifications(data.notifications ?? []);
-      setUnreadCount(data.unread_count ?? 0);
-    } catch {
-      setError("Failed to load notifications. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchNotifications();
-  }, [fetchNotifications]);
+  const {
+    notifications,
+    unreadCount,
+    loading,
+    error,
+    refresh,
+    markRead,
+    markAllRead,
+  } = useNotifications();
 
   const handleClick = async (notification: AppNotification) => {
-    // Mark as read if unread
+    // Mark as read if unread (optimistic update via shared hook)
     if (!notification.read_at) {
       setMarkingId(notification.id);
-      try {
-        await fetch(`/api/notifications/${notification.id}/read`, {
-          method: "PATCH",
-        });
-        setNotifications((prev) =>
-          prev.map((n) =>
-            n.id === notification.id ? { ...n, read_at: new Date().toISOString() } : n,
-          ),
-        );
-        setUnreadCount((prev) => Math.max(0, prev - 1));
-      } catch {
-        // If marking read fails, still navigate
-      } finally {
-        setMarkingId(null);
-      }
+      await markRead(notification.id);
+      setMarkingId(null);
     }
 
     // Navigate to the notification's link
@@ -126,21 +93,8 @@ export function NotificationsClient() {
 
   const handleMarkAllRead = async () => {
     setMarkingAll(true);
-    try {
-      const res = await fetch("/api/notifications/read-all", {
-        method: "PATCH",
-      });
-      if (res.ok) {
-        setNotifications((prev) =>
-          prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString() })),
-        );
-        setUnreadCount(0);
-      }
-    } catch {
-      // Ignore errors for mark-all
-    } finally {
-      setMarkingAll(false);
-    }
+    await markAllRead();
+    setMarkingAll(false);
   };
 
   // Loading state
@@ -172,7 +126,7 @@ export function NotificationsClient() {
               variant="outline"
               size="sm"
               className="mt-3"
-              onClick={fetchNotifications}
+              onClick={refresh}
             >
               Try Again
             </Button>

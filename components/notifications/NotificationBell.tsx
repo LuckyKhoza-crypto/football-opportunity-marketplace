@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Bell, Loader2, UserPlus, RefreshCw, MessageSquare } from "lucide-react";
-import { useNotificationsRealtime } from "@/lib/use-notifications-realtime";
+import { useNotifications } from "@/lib/use-notifications";
 import type { AppNotification, NotificationType } from "@/types";
 
 function formatRelativeTime(dateStr: string): string {
@@ -57,11 +57,15 @@ export function NotificationBell() {
   const userId = session?.user?.id ?? null;
 
   const [open, setOpen] = useState(false);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const bellRef = useRef<HTMLDivElement>(null);
+  const {
+    notifications,
+    unreadCount,
+    loading,
+    error,
+    refresh,
+    markRead,
+  } = useNotifications();
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -76,71 +80,12 @@ export function NotificationBell() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open]);
 
-  const fetchNotifications = useCallback(async () => {
-    if (!userId) return;
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await fetch("/api/notifications?limit=5");
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Failed to fetch notifications");
-        return;
-      }
-      setNotifications(data.notifications ?? []);
-      setUnreadCount(data.unread_count ?? 0);
-    } catch {
-      setError("Failed to load notifications");
-    } finally {
-      setLoading(false);
-    }
-  }, [userId]);
-
-  // Fetch on mount and when user changes
-  useEffect(() => {
-    if (userId) {
-      fetchNotifications();
-    }
-  }, [userId, fetchNotifications]);
-
-  // Realtime updates — when a new notification arrives for this user,
-  // update the unread badge and prepend to the dropdown if open.
-  const handleRealtimeNotification = useCallback(
-    (notification: AppNotification) => {
-      setNotifications((prev) => {
-        // Deduplicate by ID
-        if (prev.some((n) => n.id === notification.id)) return prev;
-        return [notification, ...prev].slice(0, 5);
-      });
-      setUnreadCount((prev) => prev + 1);
-    },
-    [],
-  );
-
-  useNotificationsRealtime({
-    userId,
-    onNotification: handleRealtimeNotification,
-    enabled: !!userId,
-  });
-
   const handleClickNotification = async (notification: AppNotification) => {
     setOpen(false);
 
-    // Mark as read if unread
+    // Mark as read if unread (optimistic update via shared hook)
     if (!notification.read_at) {
-      try {
-        await fetch(`/api/notifications/${notification.id}/read`, {
-          method: "PATCH",
-        });
-        setNotifications((prev) =>
-          prev.map((n) =>
-            n.id === notification.id ? { ...n, read_at: new Date().toISOString() } : n,
-          ),
-        );
-        setUnreadCount((prev) => Math.max(0, prev - 1));
-      } catch {
-        // If marking read fails, still navigate
-      }
+      await markRead(notification.id);
     }
 
     // Navigate to the notification's link
@@ -157,7 +102,7 @@ export function NotificationBell() {
       <button
         onClick={() => {
           setOpen(!open);
-          if (!open) fetchNotifications();
+          if (!open) refresh();
         }}
         className="relative flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-accent"
         aria-label="Notifications"
@@ -193,7 +138,7 @@ export function NotificationBell() {
               <div className="px-4 py-6 text-center">
                 <p className="text-sm text-muted-foreground">{error}</p>
                 <button
-                  onClick={fetchNotifications}
+                  onClick={refresh}
                   className="mt-2 text-sm font-medium text-primary hover:underline"
                 >
                   Retry

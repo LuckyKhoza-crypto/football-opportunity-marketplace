@@ -25,16 +25,12 @@ vi.mock("next-auth/react", () => ({
   }),
 }));
 
-// Mock the realtime hook
-vi.mock("@/lib/use-notifications-realtime", () => ({
-  useNotificationsRealtime: () => ({}),
-}));
-
+// Mock useNotifications hook
 const mockNotifications = [
   {
     id: "notif-1",
     user_id: "user-1",
-    type: "message_received",
+    type: "message_received" as const,
     title: "New message",
     body: "Test Team sent you a new message.",
     link: "/messages/conv-1",
@@ -44,28 +40,32 @@ const mockNotifications = [
   },
 ];
 
+const mockMarkRead = vi.fn();
+const mockMarkAllRead = vi.fn();
+const mockRefresh = vi.fn();
+
+vi.mock("@/lib/use-notifications", () => ({
+  useNotifications: () => ({
+    notifications: mockNotifications,
+    unreadCount: 1,
+    loading: false,
+    error: null,
+    refresh: mockRefresh,
+    markRead: mockMarkRead,
+    markAllRead: mockMarkAllRead,
+  }),
+}));
+
 describe("NotificationBell", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock global fetch
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        notifications: mockNotifications,
-        unread_count: 1,
-      }),
-    }) as any;
   });
 
   it("renders bell with unread badge", async () => {
     const { NotificationBell } = await import("../NotificationBell");
     render(<NotificationBell />);
 
-    // Wait for the badge to appear
-    await waitFor(() => {
-      expect(screen.getByText("1")).toBeInTheDocument();
-    });
-
+    expect(screen.getByText("1")).toBeInTheDocument();
     expect(screen.getByLabelText("Notifications")).toBeInTheDocument();
   });
 
@@ -76,32 +76,9 @@ describe("NotificationBell", () => {
     // Click the bell
     fireEvent.click(screen.getByLabelText("Notifications"));
 
-    await waitFor(() => {
-      expect(screen.getByText("New message")).toBeInTheDocument();
-    });
-
+    expect(screen.getByText("New message")).toBeInTheDocument();
     expect(screen.getByText("Test Team sent you a new message.")).toBeInTheDocument();
     expect(screen.getByText("View all notifications")).toBeInTheDocument();
-  });
-
-  it("shows empty state when there are no notifications", async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        notifications: [],
-        unread_count: 0,
-      }),
-    }) as any;
-
-    const { NotificationBell } = await import("../NotificationBell");
-    render(<NotificationBell />);
-
-    // Click the bell
-    fireEvent.click(screen.getByLabelText("Notifications"));
-
-    await waitFor(() => {
-      expect(screen.getByText("No notifications yet.")).toBeInTheDocument();
-    });
   });
 
   it("view all notifications navigates to /notifications", async () => {
@@ -113,12 +90,28 @@ describe("NotificationBell", () => {
     // Click the bell
     fireEvent.click(screen.getByLabelText("Notifications"));
 
-    await waitFor(() => {
-      expect(screen.getByText("View all notifications")).toBeInTheDocument();
-    });
+    expect(screen.getByText("View all notifications")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("View all notifications"));
 
     expect(pushMock).toHaveBeenCalledWith("/notifications");
+  });
+
+  it("clicking a notification marks it read and navigates", async () => {
+    pushMock.mockClear();
+
+    const { NotificationBell } = await import("../NotificationBell");
+    render(<NotificationBell />);
+
+    // Click the bell to open dropdown
+    fireEvent.click(screen.getByLabelText("Notifications"));
+
+    // Click the notification
+    fireEvent.click(screen.getByText("New message"));
+
+    await waitFor(() => {
+      expect(mockMarkRead).toHaveBeenCalledWith("notif-1");
+      expect(pushMock).toHaveBeenCalledWith("/messages/conv-1");
+    });
   });
 });

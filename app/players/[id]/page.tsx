@@ -13,6 +13,7 @@ import {
   type PreviousClub,
 } from "@/types";
 import { ArrowLeft, MapPin, Calendar, Target, Trophy, Video, Award, Users, Globe } from "lucide-react";
+import { ContactPlayerButton } from "@/components/messaging/ContactPlayerButton";
 
 function formatPositions(positions: Position[]): string {
   return positions.join(" / ");
@@ -60,13 +61,14 @@ export default async function PublicPlayerProfilePage({
     <div className="container mx-auto px-4 py-12">
       <div className="mx-auto max-w-3xl">
         {/* Back */}
-        <div className="mb-6">
+        <div className="mb-6 flex items-center justify-between">
           <Link href="/team/find-players">
             <Button variant="ghost" size="sm">
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Player Discovery
             </Button>
           </Link>
+          <ContactPlayerButton playerProfileId={typedProfile.id} />
         </div>
 
         {/* Profile Header */}

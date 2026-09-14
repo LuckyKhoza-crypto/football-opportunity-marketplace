@@ -377,8 +377,10 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
 
   const conversation = data.conversation;
   const application = conversation?.application;
-  const opportunity = application?.opportunity;
-  const playerProfile = application?.player_profile;
+  const outreach = conversation?.outreach;
+  const appOrOutreach = application ?? outreach;
+  const opportunity = appOrOutreach?.opportunity;
+  const playerProfile = appOrOutreach?.player_profile;
   const participants = data.participants as Participant[];
 
   // Determine the display context
@@ -434,13 +436,13 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
                   <span
                     className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                       APPLICATION_STATUS_COLORS[
-                        application?.status as ApplicationStatus
+                        (appOrOutreach?.status ?? "pending") as ApplicationStatus
                       ] ?? "bg-gray-100 text-gray-800"
                     }`}
                   >
                     {APPLICATION_STATUS_LABELS[
-                      application?.status as ApplicationStatus
-                    ] ?? application?.status}
+                      (appOrOutreach?.status ?? "pending") as ApplicationStatus
+                    ] ?? appOrOutreach?.status}
                   </span>
 
                   {data.match_result && (
