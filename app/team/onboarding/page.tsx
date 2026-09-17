@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,6 +84,8 @@ async function uploadTeamLogo(file: File): Promise<string> {
 export default function TeamOnboardingPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const teamId = searchParams.get("team");
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -107,13 +109,25 @@ export default function TeamOnboardingPage() {
       if (!res.ok) return;
       const { teamProfile } = await res.json();
 
-      if (teamProfile) {
-        // Already has profile, go to team dashboard
-        router.push("/team");
+      // If the user already has a team and is NOT the multi-team admin,
+      // redirect to the team dashboard. The multi-team admin can create more.
+      if (teamProfile && !teamId) {
+        // Check if this is a multi-team admin by checking if they can create more
+        const listRes = await fetch("/api/team/list");
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          if (!listData.can_create_team) {
+            router.push("/team");
+            return;
+          }
+        } else {
+          router.push("/team");
+          return;
+        }
       }
     }
     checkExistingProfile();
-  }, [session, status, router]);
+  }, [session, status, router, teamId]);
 
   const validateStep = useCallback(
     (stepNumber: number): boolean => {

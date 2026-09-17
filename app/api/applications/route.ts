@@ -328,15 +328,25 @@ export async function GET(request: Request) {
       return NextResponse.json({ applications: applicationsWithMatches ?? [] });
     } else if (context === "team") {
       // Team viewing applications for their opportunities
-      const { data: teamProfile } = await supabaseAdmin
+      const teamIdParam = searchParams.get("team_id");
+
+      let teamProfileQuery = supabaseAdmin
         .from("team_profiles")
         .select("id")
-        .eq("user_id", session.user.id)
-        .single();
+        .eq("user_id", session.user.id);
+
+      if (teamIdParam) {
+        teamProfileQuery = teamProfileQuery.eq("id", teamIdParam);
+      }
+
+      const { data: teamProfile } = await teamProfileQuery
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
 
       if (!teamProfile) {
         return NextResponse.json(
-          { error: "Team profile not found" },
+          { error: "Team profile not found or access denied" },
           { status: 404 },
         );
       }

@@ -36,15 +36,43 @@ function buildOpportunityData(
 }
 
 // Verify the requesting user owns the team profile
-async function verifyTeamOwnership(userId: string): Promise<{
+async function verifyTeamOwnership(
+  userId: string,
+  teamId?: string | null,
+): Promise<{
   teamId: string | null;
   error: NextResponse | null;
 }> {
+  if (teamId) {
+    // Verify the specific team belongs to the user
+    const { data: teamProfile } = await supabaseAdmin
+      .from("team_profiles")
+      .select("id")
+      .eq("id", teamId)
+      .eq("user_id", userId)
+      .single();
+
+    if (!teamProfile) {
+      return {
+        teamId: null,
+        error: NextResponse.json(
+          { error: "Team profile not found or access denied" },
+          { status: 404 },
+        ),
+      };
+    }
+
+    return { teamId: teamProfile.id, error: null };
+  }
+
+  // Fallback: get the user's first team
   const { data: teamProfile } = await supabaseAdmin
     .from("team_profiles")
     .select("id")
     .eq("user_id", userId)
-    .single();
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
 
   if (!teamProfile) {
     return {
@@ -60,7 +88,7 @@ async function verifyTeamOwnership(userId: string): Promise<{
 }
 
 // List opportunities for the authenticated team
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
@@ -70,7 +98,10 @@ export async function GET() {
       );
     }
 
-    const { teamId, error } = await verifyTeamOwnership(session.user.id);
+    const { searchParams } = new URL(request.url);
+    const teamIdParam = searchParams.get("team_id");
+
+    const { teamId, error } = await verifyTeamOwnership(session.user.id, teamIdParam);
     if (error || !teamId) return error ?? NextResponse.json(
       { error: "Team profile not found" },
       { status: 404 },
@@ -111,13 +142,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const { teamId, error } = await verifyTeamOwnership(session.user.id);
+    const body = await request.json();
+    const teamIdParam = body.team_id as string | undefined;
+
+    const { teamId, error } = await verifyTeamOwnership(session.user.id, teamIdParam);
     if (error || !teamId) return error ?? NextResponse.json(
       { error: "Team profile not found" },
       { status: 404 },
     );
-
-    const body = await request.json();
 
     // Validate required fields
     if (!body.title || !body.title.trim()) {

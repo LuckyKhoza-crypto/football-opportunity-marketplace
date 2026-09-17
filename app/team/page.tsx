@@ -15,8 +15,13 @@ import {
   type Opportunity,
 } from "@/types";
 import { MapPin, Users, Trophy, Plus, ArrowRight, Swords, Search } from "lucide-react";
+import { getSelectedTeamId, resolveSelectedTeam } from "@/lib/team-context";
 
-export default async function TeamDashboardPage() {
+export default async function TeamDashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await getServerSession(authOptions);
 
   if (!session?.user?.email) {
@@ -44,11 +49,9 @@ export default async function TeamDashboardPage() {
     redirect("/onboarding");
   }
 
-  const { data: teamProfile } = await supabaseAdmin
-    .from("team_profiles")
-    .select("*")
-    .eq("user_id", profile.id)
-    .single();
+  const resolvedSearchParams = await searchParams;
+  const selectedTeamId = getSelectedTeamId(resolvedSearchParams);
+  const teamProfile = await resolveSelectedTeam(profile.id, selectedTeamId);
 
   // If no team profile exists, redirect to onboarding
   if (!teamProfile) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -71,6 +71,8 @@ async function uploadTeamLogo(file: File): Promise<string> {
 export default function EditTeamProfilePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const teamId = searchParams.get("team");
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -99,7 +101,7 @@ export default function EditTeamProfilePage() {
 
     async function loadProfile() {
       try {
-        const res = await fetch("/api/team/profile-data");
+        const res = await fetch(`/api/team/profile-data${teamId ? `?team=${teamId}` : ""}`);
         if (!res.ok) throw new Error("Failed to load profile");
 
         const { teamProfile } = await res.json();
@@ -233,6 +235,7 @@ export default function EditTeamProfilePage() {
         contact_name: formData.contact_name || null,
         website_url: formData.website_url || null,
         social_links: socialLinksList,
+        team_id: teamId,
       };
 
       const res = await fetch("/api/team/profile", {

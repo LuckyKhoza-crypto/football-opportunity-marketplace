@@ -14,11 +14,14 @@ import {
   PLAYING_LEVEL_LABELS,
   OPPORTUNITY_STATUS_LABELS,
 } from "@/types";
+import { getSelectedTeamId, resolveSelectedTeam } from "@/lib/team-context";
 
 export default async function TeamOpportunityPlayersPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await getServerSession(authOptions);
 
@@ -45,11 +48,9 @@ export default async function TeamOpportunityPlayersPage({
   }
 
   // Fetch team profile
-  const { data: teamProfile } = await supabaseAdmin
-    .from("team_profiles")
-    .select("*")
-    .eq("user_id", profile.id)
-    .single();
+  const resolvedSearchParams = await searchParams;
+  const selectedTeamId = getSelectedTeamId(resolvedSearchParams);
+  const teamProfile = await resolveSelectedTeam(profile.id, selectedTeamId);
 
   if (!teamProfile) {
     redirect("/team/onboarding");

@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -75,6 +75,8 @@ export default function EditOpportunityPage({
 }) {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const teamId = searchParams.get("team");
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +124,7 @@ export default function EditOpportunityPage({
 
     async function loadOpportunity() {
       try {
-        const res = await fetch(`/api/team/opportunities/${opportunityId}`);
+        const res = await fetch(`/api/team/opportunities/${opportunityId}${teamId ? `?team_id=${teamId}` : ""}`);
         if (!res.ok) throw new Error("Failed to load opportunity");
 
         const { opportunity } = await res.json();
@@ -164,7 +166,7 @@ export default function EditOpportunityPage({
     }
 
     loadOpportunity();
-  }, [session, status, router, opportunityId]);
+  }, [session, status, router, opportunityId, teamId]);
 
   const updateField = (field: keyof FormData, value: unknown) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -288,6 +290,7 @@ export default function EditOpportunityPage({
         radius: formData.radius ? parseInt(formData.radius) : null,
         tryout_date: formData.tryout_date || null,
         status,
+        team_id: teamId,
       };
 
       const res = await fetch(`/api/team/opportunities/${opportunityId}`, {

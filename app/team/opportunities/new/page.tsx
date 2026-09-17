@@ -1,7 +1,7 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,6 +93,8 @@ const emptyFormData: FormData = {
 export default function NewOpportunityPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const teamId = searchParams.get("team");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<FormData>({ ...emptyFormData });
@@ -227,6 +229,7 @@ export default function NewOpportunityPage() {
         radius: formData.radius ? parseInt(formData.radius) : null,
         tryout_date: formData.tryout_date || null,
         status,
+        team_id: teamId,
       };
 
       const res = await fetch("/api/team/opportunities", {

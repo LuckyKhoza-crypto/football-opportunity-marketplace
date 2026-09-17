@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MatchDetails } from "@/components/marketplace/match-details";
@@ -284,6 +285,8 @@ export function TeamApplicationsClient() {
   const [opportunities, setOpportunities] = useState<OpportunitySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const teamId = searchParams.get("team");
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<ApplicationStatus | "all">("all");
@@ -324,6 +327,9 @@ export function TeamApplicationsClient() {
       setError(null);
 
       const params = new URLSearchParams({ context: "team" });
+      if (teamId) {
+        params.set("team_id", teamId);
+      }
       if (statusFilter !== "all") {
         params.set("status", statusFilter);
       }
@@ -354,7 +360,7 @@ export function TeamApplicationsClient() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, opportunityFilter, positionFilter, matchQualityFilter, sortBy]);
+  }, [statusFilter, opportunityFilter, positionFilter, matchQualityFilter, sortBy, teamId]);
 
   useEffect(() => {
     fetchApplications();

@@ -31,6 +31,7 @@ import {
   Shield,
 } from "lucide-react";
 import { OpportunityActionsClient } from "./OpportunityActionsClient";
+import { getSelectedTeamId, resolveSelectedTeam } from "@/lib/team-context";
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "Not set";
@@ -65,8 +66,10 @@ function InfoRow({
 
 export default async function OpportunityDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await getServerSession(authOptions);
 
@@ -86,11 +89,9 @@ export default async function OpportunityDetailPage({
     redirect("/onboarding");
   }
 
-  const { data: teamProfile } = await supabaseAdmin
-    .from("team_profiles")
-    .select("*")
-    .eq("user_id", profile.id)
-    .single();
+  const resolvedSearchParams = await searchParams;
+  const selectedTeamId = getSelectedTeamId(resolvedSearchParams);
+  const teamProfile = await resolveSelectedTeam(profile.id, selectedTeamId);
 
   if (!teamProfile) {
     redirect("/team/onboarding");

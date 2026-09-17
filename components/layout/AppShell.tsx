@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useAppView } from "@/lib/use-app-view";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { TeamSwitcher } from "@/components/layout/TeamSwitcher";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -34,6 +35,7 @@ const teamNavItems = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data: session } = useSession();
   const {
     view,
@@ -46,6 +48,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
+  const [teams, setTeams] = useState<{ id: string; team_name: string; logo_url: string | null }[]>([]);
+  const [canCreateTeam, setCanCreateTeam] = useState(false);
+
+  // Fetch teams when in team view
+  useEffect(() => {
+    if (!isTeamView || !session?.user?.id) {
+      setTeams([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/team/list");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) {
+          setTeams(data.teams ?? []);
+          setCanCreateTeam(data.can_create_team ?? false);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isTeamView, session?.user?.id]);
+
+  const currentTeamId = searchParams.get("team");
 
   // Close account menu on outside click
   useEffect(() => {
@@ -156,6 +187,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-2">
             {session?.user ? (
               <>
+                {isTeamView && teams.length > 0 && (
+                  <TeamSwitcher
+                    teams={teams}
+                    currentTeamId={currentTeamId}
+                    canCreateTeam={canCreateTeam}
+                  />
+                )}
                 <NotificationBell />
                 <div className="relative" ref={accountMenuRef}>
                 <button

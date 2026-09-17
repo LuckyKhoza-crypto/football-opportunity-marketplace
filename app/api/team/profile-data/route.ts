@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const session = await getServerSession(authOptions);
 
@@ -11,22 +11,48 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { data: teamProfile, error } = await supabaseAdmin
+    const { searchParams } = new URL(request.url);
+    const teamId = searchParams.get("team");
+
+    if (teamId) {
+      // Fetch a specific team and verify ownership
+      const { data: teamProfile, error } = await supabaseAdmin
+        .from("team_profiles")
+        .select("*")
+        .eq("id", teamId)
+        .eq("user_id", session.user.id)
+        .single();
+
+      if (error && error.code !== "PGRST116") {
+        console.error("Failed to fetch team profile:", error);
+        return NextResponse.json(
+          { error: "Failed to fetch team profile" },
+          { status: 500 },
+        );
+      }
+
+      return NextResponse.json({ teamProfile });
+    }
+
+    // Fetch all teams for the user
+    const { data: teamProfiles, error } = await supabaseAdmin
       .from("team_profiles")
       .select("*")
       .eq("user_id", session.user.id)
-      .single();
+      .order("created_at", { ascending: true });
 
-    if (error && error.code !== "PGRST116") {
-      // PGRST116 = no rows returned
-      console.error("Failed to fetch team profile:", error);
+    if (error) {
+      console.error("Failed to fetch team profiles:", error);
       return NextResponse.json(
-        { error: "Failed to fetch team profile" },
+        { error: "Failed to fetch team profiles" },
         { status: 500 },
       );
     }
 
-    return NextResponse.json({ teamProfile });
+    return NextResponse.json({
+      teamProfiles: teamProfiles ?? [],
+      teamProfile: teamProfiles?.[0] ?? null,
+    });
   } catch (err) {
     console.error("Team profile fetch error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
