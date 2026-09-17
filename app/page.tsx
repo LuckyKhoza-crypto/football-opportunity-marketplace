@@ -24,7 +24,7 @@ async function getLatestOpportunities() {
     `)
     .eq("status", "active")
     .order("created_at", { ascending: false })
-    .limit(6);
+    .limit(4);
 
   if (error) {
     console.error("Failed to fetch latest opportunities:", error);
