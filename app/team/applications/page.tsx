@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { TeamApplicationsClient } from "./TeamApplicationsClient";
-import { getSelectedTeamId, resolveSelectedTeam } from "@/lib/team-context";
+import { getSelectedTeamIdWithFallback, resolveSelectedTeam } from "@/lib/team-context-server";
 
 export default async function TeamApplicationsPage({
   searchParams,
@@ -32,7 +32,7 @@ export default async function TeamApplicationsPage({
   }
 
   const resolvedSearchParams = await searchParams;
-  const selectedTeamId = getSelectedTeamId(resolvedSearchParams);
+  const selectedTeamId = await getSelectedTeamIdWithFallback(resolvedSearchParams);
   const teamProfile = await resolveSelectedTeam(profile.id, selectedTeamId);
 
   if (!teamProfile) {
@@ -49,7 +49,7 @@ export default async function TeamApplicationsPage({
           </p>
         </div>
 
-        <TeamApplicationsClient />
+        <TeamApplicationsClient teamId={teamProfile.id} />
       </div>
     </div>
   );

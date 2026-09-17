@@ -46,6 +46,7 @@ interface TeamPlayerDiscoveryClientProps {
   opportunityId: string;
   opportunityStatus?: string;
   opportunity?: Partial<Opportunity> | null;
+  teamId?: string | null;
 }
 
 const MIN_MATCH_OPTIONS = [
@@ -69,6 +70,7 @@ export function TeamPlayerDiscoveryClient({
   totalCount,
   opportunityId,
   opportunity,
+  teamId,
 }: TeamPlayerDiscoveryClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -102,9 +104,13 @@ export function TeamPlayerDiscoveryClient({
   );
 
   const clearFilters = useCallback(() => {
-    router.push(`/team/opportunities/${opportunityId}/players`);
+    router.push(
+      teamId
+        ? `/team/opportunities/${opportunityId}/players?team=${teamId}`
+        : `/team/opportunities/${opportunityId}/players`,
+    );
     setCurrentPage(0);
-  }, [router, opportunityId]);
+  }, [router, opportunityId, teamId]);
 
   const updateFilter = useCallback(
     (key: string, value: string) => {
@@ -289,7 +295,7 @@ export function TeamPlayerDiscoveryClient({
                 ))}
               </ul>
               <div className="mt-3">
-                <a href={`/team/opportunities/${opportunityId}/edit`}>
+                <a href={`/team/opportunities/${opportunityId}/edit${teamId ? `?team=${teamId}` : ""}`}>
                   <Button size="sm" variant="outline">
                     Edit Opportunity
                   </Button>

@@ -2,7 +2,8 @@
 
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, useCallback } from "react";
+import { getSelectedTeamIdFromLocalStorage } from "@/lib/team-context";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -82,10 +83,18 @@ async function uploadTeamLogo(file: File): Promise<string> {
 }
 
 export default function TeamOnboardingPage() {
+  return (
+    <Suspense fallback={<div className="container mx-auto flex min-h-[calc(100vh-8rem)] items-center justify-center px-4 py-12"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>}>
+      <TeamOnboardingContent />
+    </Suspense>
+  );
+}
+
+function TeamOnboardingContent() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const teamId = searchParams.get("team");
+  const teamId = searchParams.get("team") ?? getSelectedTeamIdFromLocalStorage();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);

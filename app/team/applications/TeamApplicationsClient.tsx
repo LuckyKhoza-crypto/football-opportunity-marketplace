@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
+import { getSelectedTeamIdFromLocalStorage } from "@/lib/team-context";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MatchDetails } from "@/components/marketplace/match-details";
@@ -280,13 +281,14 @@ function MatchScoreBadge({ score, classification }: { score: number; classificat
   );
 }
 
-export function TeamApplicationsClient() {
+export function TeamApplicationsClient({ teamId }: { teamId?: string | null }) {
   const [applications, setApplications] = useState<ApplicationWithDetails[]>([]);
   const [opportunities, setOpportunities] = useState<OpportunitySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const searchParams = useSearchParams();
-  const teamId = searchParams.get("team");
+  const teamIdFromParams = searchParams.get("team") ?? getSelectedTeamIdFromLocalStorage();
+  const resolvedTeamId = teamId ?? teamIdFromParams;
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<ApplicationStatus | "all">("all");
@@ -327,8 +329,8 @@ export function TeamApplicationsClient() {
       setError(null);
 
       const params = new URLSearchParams({ context: "team" });
-      if (teamId) {
-        params.set("team_id", teamId);
+      if (resolvedTeamId) {
+        params.set("team_id", resolvedTeamId);
       }
       if (statusFilter !== "all") {
         params.set("status", statusFilter);
@@ -360,7 +362,7 @@ export function TeamApplicationsClient() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, opportunityFilter, positionFilter, matchQualityFilter, sortBy, teamId]);
+  }, [statusFilter, opportunityFilter, positionFilter, matchQualityFilter, sortBy, resolvedTeamId]);
 
   useEffect(() => {
     fetchApplications();

@@ -2,7 +2,8 @@
 
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { getSelectedTeamIdFromLocalStorage } from "@/lib/team-context";
+import { useEffect, useState, Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -69,10 +70,18 @@ async function uploadTeamLogo(file: File): Promise<string> {
 }
 
 export default function EditTeamProfilePage() {
+  return (
+    <Suspense fallback={<div className="container mx-auto flex min-h-[calc(100vh-8rem)] items-center justify-center px-4 py-12"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>}>
+      <EditTeamProfileContent />
+    </Suspense>
+  );
+}
+
+function EditTeamProfileContent() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const teamId = searchParams.get("team");
+  const teamId = searchParams.get("team") ?? getSelectedTeamIdFromLocalStorage();
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -257,7 +266,7 @@ export default function EditTeamProfilePage() {
 
       setSuccess(true);
       setTimeout(() => {
-        router.push("/team/profile");
+        router.push(teamId ? `/team/profile?team=${teamId}` : "/team/profile");
         router.refresh();
       }, 1500);
     } catch (err) {
@@ -509,7 +518,7 @@ export default function EditTeamProfilePage() {
         <div className="mt-6 flex justify-between">
           <Button
             variant="outline"
-            onClick={() => router.push("/team/profile")}
+            onClick={() => router.push(teamId ? `/team/profile?team=${teamId}` : "/team/profile")}
           >
             Cancel
           </Button>

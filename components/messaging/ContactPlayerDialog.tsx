@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { getSelectedTeamIdFromLocalStorage } from "@/lib/team-context";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -22,7 +23,7 @@ interface TeamOpportunity {
 export function ContactPlayerDialog({ playerProfileId, onClose }: ContactPlayerDialogProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const teamId = searchParams.get("team");
+  const teamId = searchParams.get("team") ?? getSelectedTeamIdFromLocalStorage();
   const [opportunities, setOpportunities] = useState<TeamOpportunity[]>([]);
   const [selectedOpportunity, setSelectedOpportunity] = useState("");
   const [message, setMessage] = useState("");

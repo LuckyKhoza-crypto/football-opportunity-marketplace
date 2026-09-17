@@ -12,7 +12,7 @@ import {
   type Opportunity,
 } from "@/types";
 import { Plus, MapPin, Swords, Users, Search } from "lucide-react";
-import { getSelectedTeamId, resolveSelectedTeam } from "@/lib/team-context";
+import { getSelectedTeamIdWithFallback, resolveSelectedTeam } from "@/lib/team-context-server";
 
 export default async function TeamFindPlayersPage({
   searchParams,
@@ -43,7 +43,7 @@ export default async function TeamFindPlayersPage({
 
   // Fetch team profile
   const resolvedSearchParams = await searchParams;
-  const selectedTeamId = getSelectedTeamId(resolvedSearchParams);
+  const selectedTeamId = await getSelectedTeamIdWithFallback(resolvedSearchParams);
   const teamProfile = await resolveSelectedTeam(profile.id, selectedTeamId);
 
   if (!teamProfile) {
@@ -81,7 +81,7 @@ export default async function TeamFindPlayersPage({
               See every discoverable player without linking to a specific
               opportunity. Filter by position, level, location, and more.
             </p>
-            <Link href="/team/players">
+            <Link href={`/team/players?team=${teamProfile.id}`}>
               <Button size="lg" variant="default">
                 <Search className="mr-2 h-5 w-5" />
                 Browse All Players
@@ -116,7 +116,7 @@ export default async function TeamFindPlayersPage({
                 You need to post an opportunity before you can discover players
                 who match your requirements.
               </p>
-              <Link href="/team/opportunities/new">
+              <Link href={`/team/opportunities/new?team=${teamProfile.id}`}>
                 <Button size="lg">
                   <Plus className="mr-2 h-5 w-5" />
                   Post an Opportunity
@@ -141,10 +141,10 @@ export default async function TeamFindPlayersPage({
                 an opportunity or create a new one to start finding players.
               </p>
               <div className="flex flex-wrap gap-3">
-                <Link href="/team/opportunities">
+                <Link href={`/team/opportunities?team=${teamProfile.id}`}>
                   <Button variant="outline">View Opportunities</Button>
                 </Link>
-                <Link href="/team/opportunities/new">
+                <Link href={`/team/opportunities/new?team=${teamProfile.id}`}>
                   <Button>
                     <Plus className="mr-2 h-4 w-4" />
                     Post an Opportunity
@@ -173,7 +173,7 @@ export default async function TeamFindPlayersPage({
               return (
                 <Link
                   key={opp.id}
-                  href={`/team/opportunities/${opp.id}/players`}
+                  href={`/team/opportunities/${opp.id}/players?team=${teamProfile.id}`}
                   className="block"
                 >
                   <Card className="transition-shadow hover:shadow-md cursor-pointer">

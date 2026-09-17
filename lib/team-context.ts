@@ -1,11 +1,7 @@
-import { supabaseAdmin } from "@/lib/supabase-admin";
-import type { TeamProfile } from "@/types";
+export const SELECTED_TEAM_COOKIE = "fom-selected-team";
+export const SELECTED_TEAM_STORAGE_KEY = "fom-selected-team";
 
-/**
- * Team context helpers for the multi-team feature.
- * The selected team is UI context only — passed via `?team=<id>`.
- * Every server operation must verify team ownership independently.
- */
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function getSelectedTeamId(
   searchParams: URLSearchParams | Record<string, string | string[] | undefined>,
@@ -18,48 +14,39 @@ export function getSelectedTeamId(
     if (typeof raw === "string") teamId = raw;
   }
   if (!teamId) return null;
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(teamId) ? teamId : null;
+  return UUID_REGEX.test(teamId) ? teamId : null;
 }
 
-export async function getUserTeams(userId: string): Promise<TeamProfile[]> {
-  const { data, error } = await supabaseAdmin
-    .from("team_profiles")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: true });
-  if (error) {
-    console.error("Failed to fetch user teams:", error);
-    return [];
-  }
-  return (data ?? []) as unknown as TeamProfile[];
-}
-
-export async function verifyTeamOwnership(
-  userId: string,
-  teamId: string,
-): Promise<TeamProfile | null> {
-  const { data, error } = await supabaseAdmin
-    .from("team_profiles")
-    .select("*")
-    .eq("id", teamId)
-    .eq("user_id", userId)
-    .single();
-  if (error || !data) return null;
-  return data as unknown as TeamProfile;
-}
-
-export async function resolveSelectedTeam(
-  userId: string,
-  teamId: string | null,
-): Promise<TeamProfile | null> {
-  if (teamId) {
-    const team = await verifyTeamOwnership(userId, teamId);
-    if (team) return team;
+/**
+ * Read the persisted selected team ID from localStorage (client-side).
+ * Returns null if not set or invalid.
+ */
+export function getSelectedTeamIdFromLocalStorage(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = localStorage.getItem(SELECTED_TEAM_STORAGE_KEY);
+    if (!stored) return null;
+    return UUID_REGEX.test(stored) ? stored : null;
+  } catch {
     return null;
   }
-  const teams = await getUserTeams(userId);
-  return teams[0] ?? null;
+}
+
+/**
+ * Persist the selected team ID to localStorage (client-side).
+ */
+export function persistSelectedTeamId(teamId: string) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(SELECTED_TEAM_STORAGE_KEY, teamId);
+  } catch {
+    // localStorage may be unavailable
+  }
+  try {
+    document.cookie = `${SELECTED_TEAM_COOKIE}=${encodeURIComponent(teamId)}; path=/; max-age=31536000; SameSite=Lax`;
+  } catch {
+    // cookie may be unavailable
+  }
 }
 
 export function withTeamParam(

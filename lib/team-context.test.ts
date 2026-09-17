@@ -1,8 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
-
-vi.mock("@/lib/supabase-admin", () => ({
-  supabaseAdmin: { from: vi.fn() },
-}));
+import { describe, it, expect } from "vitest";
 
 import { getSelectedTeamId, withTeamParam } from "@/lib/team-context";
 

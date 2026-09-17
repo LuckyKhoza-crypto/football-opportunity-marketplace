@@ -5,6 +5,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { ChevronDown, Check, Plus, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { persistSelectedTeamId } from "@/lib/team-context";
 
 interface TeamSwitcherProps {
   teams: {
@@ -46,6 +47,8 @@ export function TeamSwitcher({
 
   const switchTeam = (teamId: string) => {
     setOpen(false);
+    // Persist the selected team to localStorage
+    persistSelectedTeamId(teamId);
     // Preserve the current path but update the team query param
     const params = new URLSearchParams(searchParams.toString());
     params.set("team", teamId);

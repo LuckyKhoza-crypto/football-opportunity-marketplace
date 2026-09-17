@@ -21,7 +21,13 @@ function formatDate(dateStr: string): string {
   });
 }
 
-export function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
+export function OpportunityCard({
+  opportunity,
+  teamId,
+}: {
+  opportunity: Opportunity;
+  teamId?: string | null;
+}) {
   const statusColor = OPPORTUNITY_STATUS_COLORS[opportunity.status] ?? "";
   const positionLabel = opportunity.position
     ? POSITION_LABELS[opportunity.position] ?? opportunity.position
@@ -72,13 +78,13 @@ export function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
 
           {/* Actions */}
           <div className="flex flex-wrap gap-2">
-            <Link href={`/team/opportunities/${opportunity.id}`}>
+            <Link href={`/team/opportunities/${opportunity.id}${teamId ? `?team=${teamId}` : ""}`}>
               <Button variant="outline" size="sm">
                 <Eye className="mr-1 h-3.5 w-3.5" />
                 View
               </Button>
             </Link>
-            <Link href={`/team/opportunities/${opportunity.id}/edit`}>
+            <Link href={`/team/opportunities/${opportunity.id}/edit${teamId ? `?team=${teamId}` : ""}`}>
               <Button variant="outline" size="sm">
                 <Pencil className="mr-1 h-3.5 w-3.5" />
                 Edit
@@ -149,7 +155,13 @@ export function OpportunityCard({ opportunity }: { opportunity: Opportunity }) {
   );
 }
 
-export function EmptyState({ status }: { status: string }) {
+export function EmptyState({
+  status,
+  teamId,
+}: {
+  status: string;
+  teamId?: string | null;
+}) {
   return (
     <Card>
       <CardContent className="flex flex-col items-center py-12 text-center">
@@ -167,7 +179,7 @@ export function EmptyState({ status }: { status: string }) {
               : "No closed opportunities yet."}
         </p>
         {status === "active" && (
-          <Link href="/team/opportunities/new">
+          <Link href={`/team/opportunities/new${teamId ? `?team=${teamId}` : ""}`}>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
               Post Your First Opportunity

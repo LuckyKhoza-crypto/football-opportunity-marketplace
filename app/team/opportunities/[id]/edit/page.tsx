@@ -2,7 +2,8 @@
 
 import { useSession } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { getSelectedTeamIdFromLocalStorage } from "@/lib/team-context";
+import { useEffect, useState, Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -73,10 +74,22 @@ export default function EditOpportunityPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  return (
+    <Suspense fallback={<div className="container mx-auto flex min-h-[calc(100vh-8rem)] items-center justify-center px-4 py-12"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>}>
+      <EditOpportunityContent params={params} />
+    </Suspense>
+  );
+}
+
+function EditOpportunityContent({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const { data: session, status } = useSession();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const teamId = searchParams.get("team");
+  const teamId = searchParams.get("team") ?? getSelectedTeamIdFromLocalStorage();
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -310,7 +323,7 @@ export default function EditOpportunityPage({
         throw new Error(errorMessage);
       }
 
-      router.push(`/team/opportunities/${opportunityId}`);
+      router.push(teamId ? `/team/opportunities/${opportunityId}?team=${teamId}` : `/team/opportunities/${opportunityId}`);
       router.refresh();
     } catch (err) {
       console.error("Failed to update opportunity:", err);
@@ -343,8 +356,8 @@ export default function EditOpportunityPage({
               size="sm"
               onClick={() =>
                 opportunityId
-                  ? router.push(`/team/opportunities/${opportunityId}`)
-                  : router.push("/team/opportunities")
+                  ? router.push(teamId ? `/team/opportunities/${opportunityId}?team=${teamId}` : `/team/opportunities/${opportunityId}`)
+                  : router.push(teamId ? `/team/opportunities?team=${teamId}` : "/team/opportunities")
               }
             >
               <ArrowLeft className="mr-2 h-4 w-4" />
@@ -833,8 +846,8 @@ export default function EditOpportunityPage({
             variant="outline"
             onClick={() =>
               opportunityId
-                ? router.push(`/team/opportunities/${opportunityId}`)
-                : router.push("/team/opportunities")
+                ? router.push(teamId ? `/team/opportunities/${opportunityId}?team=${teamId}` : `/team/opportunities/${opportunityId}`)
+                : router.push(teamId ? `/team/opportunities?team=${teamId}` : "/team/opportunities")
             }
           >
             <ArrowLeft className="mr-2 h-4 w-4" />

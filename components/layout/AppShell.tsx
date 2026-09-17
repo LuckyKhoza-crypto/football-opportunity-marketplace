@@ -1,14 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useState, useRef, useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useAppView } from "@/lib/use-app-view";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
-import { TeamSwitcher } from "@/components/layout/TeamSwitcher";
+import { TeamSwitcherWithContext } from "@/components/layout/TeamSwitcherWithContext";
 import { cn } from "@/lib/utils";
+import { getSelectedTeamIdFromLocalStorage } from "@/lib/team-context";
 
 const navItems = [
   { label: "Home", href: "/" },
@@ -35,7 +36,7 @@ const teamNavItems = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
   const { data: session } = useSession();
   const {
     view,
@@ -50,6 +51,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const [teams, setTeams] = useState<{ id: string; team_name: string; logo_url: string | null }[]>([]);
   const [canCreateTeam, setCanCreateTeam] = useState(false);
+
+  // Read current team ID from URL on pathname change, fall back to localStorage
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("team");
+    if (fromUrl) {
+      setCurrentTeamId(fromUrl);
+    } else {
+      setCurrentTeamId(getSelectedTeamIdFromLocalStorage());
+    }
+  }, [pathname]);
 
   // Fetch teams when in team view
   useEffect(() => {
@@ -75,8 +87,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, [isTeamView, session?.user?.id]);
-
-  const currentTeamId = searchParams.get("team");
 
   // Close account menu on outside click
   useEffect(() => {
@@ -170,7 +180,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               teamNavItems.map((item) => (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={currentTeamId ? `${item.href}?team=${currentTeamId}` : item.href}
                   className={cn(
                     "text-sm font-medium transition-colors hover:text-primary",
                     pathname === item.href
@@ -188,11 +198,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {session?.user ? (
               <>
                 {isTeamView && teams.length > 0 && (
-                  <TeamSwitcher
-                    teams={teams}
-                    currentTeamId={currentTeamId}
-                    canCreateTeam={canCreateTeam}
-                  />
+                  <Suspense fallback={null}>
+                    <TeamSwitcherWithContext
+                      teams={teams}
+                      canCreateTeam={canCreateTeam}
+                    />
+                  </Suspense>
                 )}
                 <NotificationBell />
                 <div className="relative" ref={accountMenuRef}>
@@ -370,7 +381,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 teamNavItems.map((item) => (
                   <Link
                     key={item.href}
-                    href={item.href}
+                    href={currentTeamId ? `${item.href}?team=${currentTeamId}` : item.href}
                     onClick={() => setMobileMenuOpen(false)}
                     className={cn(
                       "block rounded-md px-3 py-2 text-sm font-medium transition-colors hover:text-primary",

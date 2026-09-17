@@ -14,7 +14,7 @@ import {
   PLAYING_LEVEL_LABELS,
   OPPORTUNITY_STATUS_LABELS,
 } from "@/types";
-import { getSelectedTeamId, resolveSelectedTeam } from "@/lib/team-context";
+import { getSelectedTeamIdWithFallback, resolveSelectedTeam } from "@/lib/team-context-server";
 
 export default async function TeamOpportunityPlayersPage({
   params,
@@ -49,7 +49,7 @@ export default async function TeamOpportunityPlayersPage({
 
   // Fetch team profile
   const resolvedSearchParams = await searchParams;
-  const selectedTeamId = getSelectedTeamId(resolvedSearchParams);
+  const selectedTeamId = await getSelectedTeamIdWithFallback(resolvedSearchParams);
   const teamProfile = await resolveSelectedTeam(profile.id, selectedTeamId);
 
   if (!teamProfile) {
@@ -140,7 +140,7 @@ export default async function TeamOpportunityPlayersPage({
       <div className="mx-auto max-w-6xl">
         {/* Back */}
         <div className="mb-6">
-          <Link href="/team/find-players">
+          <Link href={`/team/find-players?team=${teamProfile.id}`}>
             <Button variant="ghost" size="sm">
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Opportunity Selection
@@ -195,6 +195,7 @@ export default async function TeamOpportunityPlayersPage({
             opportunityId={opportunityId}
             opportunityStatus={typedOpportunity.status}
             opportunity={typedOpportunity}
+            teamId={teamProfile.id}
           />
         </Suspense>
       </div>

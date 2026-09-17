@@ -27,6 +27,13 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!team_id) {
+      return NextResponse.json(
+        { error: "team_id is required" },
+        { status: 400 },
+      );
+    }
+
     if (typeof message !== "string" || message.trim().length === 0) {
       return NextResponse.json(
         { error: "Initial message is required" },
@@ -43,27 +50,13 @@ export async function POST(request: Request) {
 
     const userId = session.user.id;
 
-    // Check user has team role/profile
-    let teamProfile: { id: string; team_name: string; user_id: string } | null = null;
-
-    if (team_id) {
-      // Verify the specific team belongs to the user
-      const { data } = await supabaseAdmin
-        .from("team_profiles")
-        .select("id, team_name, user_id")
-        .eq("user_id", userId)
-        .eq("id", team_id)
-        .single();
-      teamProfile = data;
-    } else {
-      // Fallback: get the user's first team
-      const { data } = await supabaseAdmin
-        .from("team_profiles")
-        .select("id, team_name, user_id")
-        .eq("user_id", userId)
-        .single();
-      teamProfile = data;
-    }
+    // Verify the specific team belongs to the user
+    const { data: teamProfile } = await supabaseAdmin
+      .from("team_profiles")
+      .select("id, team_name, user_id")
+      .eq("user_id", userId)
+      .eq("id", team_id)
+      .single();
 
     if (!teamProfile) {
       return NextResponse.json(
