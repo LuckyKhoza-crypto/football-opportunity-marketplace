@@ -6,28 +6,56 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 async function verifyOpportunityOwnership(
   userId: string,
   opportunityId: string,
+  teamId?: string | null,
 ): Promise<{ opportunity: Record<string, unknown> | null; error: NextResponse | null }> {
-  const { data: teamProfile } = await supabaseAdmin
-    .from("team_profiles")
-    .select("id")
-    .eq("user_id", userId)
-    .single();
+  let teamProfileId: string | null = null;
 
-  if (!teamProfile) {
-    return {
-      opportunity: null,
-      error: NextResponse.json(
-        { error: "Team profile not found" },
-        { status: 404 },
-      ),
-    };
+  if (teamId) {
+    // Verify the specific team belongs to the user
+    const { data: teamProfile } = await supabaseAdmin
+      .from("team_profiles")
+      .select("id")
+      .eq("id", teamId)
+      .eq("user_id", userId)
+      .single();
+
+    if (!teamProfile) {
+      return {
+        opportunity: null,
+        error: NextResponse.json(
+          { error: "Team profile not found or access denied" },
+          { status: 404 },
+        ),
+      };
+    }
+    teamProfileId = teamProfile.id;
+  } else {
+    // Fallback: get the user's first team
+    const { data: teamProfile } = await supabaseAdmin
+      .from("team_profiles")
+      .select("id")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (!teamProfile) {
+      return {
+        opportunity: null,
+        error: NextResponse.json(
+          { error: "Team profile not found" },
+          { status: 404 },
+        ),
+      };
+    }
+    teamProfileId = teamProfile.id;
   }
 
   const { data: opportunity } = await supabaseAdmin
     .from("opportunities")
     .select("*")
     .eq("id", opportunityId)
-    .eq("team_id", teamProfile.id)
+    .eq("team_id", teamProfileId)
     .single();
 
   if (!opportunity) {
@@ -45,7 +73,7 @@ async function verifyOpportunityOwnership(
 
 // Get a single opportunity
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -58,9 +86,13 @@ export async function GET(
     }
 
     const { id } = await params;
+    const { searchParams } = new URL(request.url);
+    const teamIdParam = searchParams.get("team_id");
+
     const { opportunity, error } = await verifyOpportunityOwnership(
       session.user.id,
       id,
+      teamIdParam,
     );
     if (error) return error;
 
@@ -89,13 +121,15 @@ export async function PUT(
     }
 
     const { id } = await params;
+    const body = await request.json();
+    const teamIdParam = body.team_id as string | undefined;
+
     const { opportunity, error } = await verifyOpportunityOwnership(
       session.user.id,
       id,
+      teamIdParam,
     );
     if (error) return error;
-
-    const body = await request.json();
 
     // Validate status if provided
     if (body.status) {
@@ -160,7 +194,7 @@ export async function PUT(
 
 // Delete an opportunity
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
@@ -173,9 +207,13 @@ export async function DELETE(
     }
 
     const { id } = await params;
+    const { searchParams } = new URL(request.url);
+    const teamIdParam = searchParams.get("team_id");
+
     const { opportunity, error } = await verifyOpportunityOwnership(
       session.user.id,
       id,
+      teamIdParam,
     );
     if (error) return error;
 

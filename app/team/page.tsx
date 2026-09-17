@@ -15,8 +15,13 @@ import {
   type Opportunity,
 } from "@/types";
 import { MapPin, Users, Trophy, Plus, ArrowRight, Swords, Search } from "lucide-react";
+import { getSelectedTeamIdWithFallback, resolveSelectedTeam } from "@/lib/team-context-server";
 
-export default async function TeamDashboardPage() {
+export default async function TeamDashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await getServerSession(authOptions);
 
   if (!session?.user?.email) {
@@ -44,11 +49,9 @@ export default async function TeamDashboardPage() {
     redirect("/onboarding");
   }
 
-  const { data: teamProfile } = await supabaseAdmin
-    .from("team_profiles")
-    .select("*")
-    .eq("user_id", profile.id)
-    .single();
+  const resolvedSearchParams = await searchParams;
+  const selectedTeamId = await getSelectedTeamIdWithFallback(resolvedSearchParams);
+  const teamProfile = await resolveSelectedTeam(profile.id, selectedTeamId);
 
   // If no team profile exists, redirect to onboarding
   if (!teamProfile) {
@@ -132,12 +135,12 @@ export default async function TeamDashboardPage() {
                     </div>
 
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <Link href="/team/profile">
+                      <Link href={`/team/profile?team=${typedProfile.id}`}>
                         <Button variant="outline" size="sm">
                           View Full Profile
                         </Button>
                       </Link>
-                      <Link href="/team/profile/edit">
+                      <Link href={`/team/profile/edit?team=${typedProfile.id}`}>
                         <Button variant="outline" size="sm">
                           Edit Profile
                         </Button>
@@ -181,7 +184,7 @@ export default async function TeamDashboardPage() {
                       ))}
                     </div>
                     <div className="mt-4">
-                      <Link href="/team/profile/edit">
+                      <Link href={`/team/profile/edit?team=${typedProfile.id}`}>
                         <Button size="sm">
                           <Users className="mr-1 h-4 w-4" /> Complete Profile
                         </Button>
@@ -209,31 +212,31 @@ export default async function TeamDashboardPage() {
                 <CardTitle>Quick Actions</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Link href="/team/profile">
+                <Link href={`/team/profile?team=${typedProfile.id}`}>
                   <Button variant="outline" className="w-full justify-start">
                     <Trophy className="mr-2 h-4 w-4" />
                     View Team Profile
                   </Button>
                 </Link>
-                <Link href="/team/profile/edit">
+                <Link href={`/team/profile/edit?team=${typedProfile.id}`}>
                   <Button variant="outline" className="w-full justify-start">
                     <Users className="mr-2 h-4 w-4" />
                     Edit Profile
                   </Button>
                 </Link>
-                <Link href="/team/opportunities/new">
+                <Link href={`/team/opportunities/new?team=${typedProfile.id}`}>
                   <Button variant="default" className="w-full justify-start">
                     <Plus className="mr-2 h-4 w-4" />
                     Post an Opportunity
                   </Button>
                 </Link>
-                <Link href="/team/find-players">
+                <Link href={`/team/find-players?team=${typedProfile.id}`}>
                   <Button variant="default" className="w-full justify-start">
                     <Search className="mr-2 h-4 w-4" />
                     Find Players
                   </Button>
                 </Link>
-                <Link href="/team/opportunities">
+                <Link href={`/team/opportunities?team=${typedProfile.id}`}>
                   <Button variant="outline" className="w-full justify-start">
                     <Swords className="mr-2 h-4 w-4" />
                     View Opportunities
@@ -284,7 +287,7 @@ export default async function TeamDashboardPage() {
                             .map((opp) => (
                               <Link
                                 key={opp.id}
-                                href={`/team/opportunities/${opp.id}/players`}
+                                href={`/team/opportunities/${opp.id}/players?team=${typedProfile.id}`}
                                 className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2 text-sm transition-colors hover:bg-muted"
                               >
                                 <span className="truncate font-medium">
@@ -295,7 +298,7 @@ export default async function TeamDashboardPage() {
                             ))}
                           {activeCount > 3 && (
                             <Link
-                              href="/team/find-players"
+                              href={`/team/find-players?team=${typedProfile.id}`}
                               className="block text-xs text-primary hover:underline"
                             >
                               View all {activeCount} active opportunities
@@ -305,7 +308,7 @@ export default async function TeamDashboardPage() {
                       </div>
                     )}
                     <div className="pt-2">
-                      <Link href="/team/opportunities">
+                      <Link href={`/team/opportunities?team=${typedProfile.id}`}>
                         <Button variant="outline" size="sm" className="w-full">
                           <ArrowRight className="mr-2 h-4 w-4" />
                           View All Opportunities
@@ -320,7 +323,7 @@ export default async function TeamDashboardPage() {
                       finding players.
                     </p>
                     <div className="mt-4">
-                      <Link href="/team/opportunities/new">
+                      <Link href={`/team/opportunities/new?team=${typedProfile.id}`}>
                         <Button variant="outline" className="w-full">
                           <Plus className="mr-2 h-4 w-4" />
                           Post an Opportunity

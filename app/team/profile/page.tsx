@@ -10,8 +10,13 @@ import {
   type TeamProfile,
 } from "@/types";
 import { MapPin, Globe, Users, Trophy, Link as LinkIcon, ExternalLink, Instagram, Twitter } from "lucide-react";
+import { getSelectedTeamIdWithFallback, resolveSelectedTeam } from "@/lib/team-context-server";
 
-export default async function TeamProfilePage() {
+export default async function TeamProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await getServerSession(authOptions);
 
   if (!session?.user?.email) {
@@ -39,11 +44,9 @@ export default async function TeamProfilePage() {
     redirect("/onboarding");
   }
 
-  const { data: teamProfile } = await supabaseAdmin
-    .from("team_profiles")
-    .select("*")
-    .eq("user_id", profile.id)
-    .single();
+  const resolvedSearchParams = await searchParams;
+  const selectedTeamId = await getSelectedTeamIdWithFallback(resolvedSearchParams);
+  const teamProfile = await resolveSelectedTeam(profile.id, selectedTeamId);
 
   if (!teamProfile) {
     redirect("/team/onboarding");
@@ -110,7 +113,7 @@ export default async function TeamProfilePage() {
             </div>
 
             {/* Edit Button */}
-            <Link href="/team/profile/edit">
+            <Link href={`/team/profile/edit?team=${typedProfile.id}`}>
               <Button variant="outline">Edit Profile</Button>
             </Link>
           </div>

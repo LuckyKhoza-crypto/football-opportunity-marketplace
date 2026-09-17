@@ -10,8 +10,13 @@ import {
 } from "@/types";
 import { Plus, Swords } from "lucide-react";
 import { OpportunityCard, EmptyState } from "./OpportunityCardClient";
+import { getSelectedTeamIdWithFallback, resolveSelectedTeam } from "@/lib/team-context-server";
 
-export default async function TeamOpportunitiesPage() {
+export default async function TeamOpportunitiesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await getServerSession(authOptions);
 
   if (!session?.user?.email) {
@@ -28,11 +33,9 @@ export default async function TeamOpportunitiesPage() {
     redirect("/onboarding");
   }
 
-  const { data: teamProfile } = await supabaseAdmin
-    .from("team_profiles")
-    .select("*")
-    .eq("user_id", profile.id)
-    .single();
+  const resolvedSearchParams = await searchParams;
+  const selectedTeamId = await getSelectedTeamIdWithFallback(resolvedSearchParams);
+  const teamProfile = await resolveSelectedTeam(profile.id, selectedTeamId);
 
   if (!teamProfile) {
     redirect("/team/onboarding");
@@ -61,7 +64,7 @@ export default async function TeamOpportunitiesPage() {
               Manage your team opportunities
             </p>
           </div>
-          <Link href="/team/opportunities/new">
+          <Link href={`/team/opportunities/new?team=${teamProfile.id}`}>
             <Button>
               <Plus className="mr-2 h-4 w-4" />
               Post an Opportunity
@@ -115,7 +118,7 @@ export default async function TeamOpportunitiesPage() {
             <h2 className="mb-4 text-xl font-semibold">Active</h2>
             <div className="space-y-4">
               {active.map((opp) => (
-                <OpportunityCard key={opp.id} opportunity={opp} />
+                <OpportunityCard key={opp.id} opportunity={opp} teamId={teamProfile.id} />
               ))}
             </div>
           </section>
@@ -124,7 +127,7 @@ export default async function TeamOpportunitiesPage() {
         {active.length === 0 && (
           <section className="mb-8">
             <h2 className="mb-4 text-xl font-semibold">Active</h2>
-            <EmptyState status="active" />
+            <EmptyState status="active" teamId={teamProfile.id} />
           </section>
         )}
 
@@ -134,7 +137,7 @@ export default async function TeamOpportunitiesPage() {
             <h2 className="mb-4 text-xl font-semibold">Drafts</h2>
             <div className="space-y-4">
               {drafts.map((opp) => (
-                <OpportunityCard key={opp.id} opportunity={opp} />
+                <OpportunityCard key={opp.id} opportunity={opp} teamId={teamProfile.id} />
               ))}
             </div>
           </section>
@@ -143,7 +146,7 @@ export default async function TeamOpportunitiesPage() {
         {drafts.length === 0 && (
           <section className="mb-8">
             <h2 className="mb-4 text-xl font-semibold">Drafts</h2>
-            <EmptyState status="draft" />
+            <EmptyState status="draft" teamId={teamProfile.id} />
           </section>
         )}
 
@@ -153,7 +156,7 @@ export default async function TeamOpportunitiesPage() {
             <h2 className="mb-4 text-xl font-semibold">Closed</h2>
             <div className="space-y-4">
               {closed.map((opp) => (
-                <OpportunityCard key={opp.id} opportunity={opp} />
+                <OpportunityCard key={opp.id} opportunity={opp} teamId={teamProfile.id} />
               ))}
             </div>
           </section>
@@ -162,7 +165,7 @@ export default async function TeamOpportunitiesPage() {
         {closed.length === 0 && (
           <section className="mb-8">
             <h2 className="mb-4 text-xl font-semibold">Closed</h2>
-            <EmptyState status="closed" />
+            <EmptyState status="closed" teamId={teamProfile.id} />
           </section>
         )}
 
@@ -180,7 +183,7 @@ export default async function TeamOpportunitiesPage() {
                 Tell players what your team is looking for. Post an opportunity
                 to describe exactly who you need.
               </p>
-              <Link href="/team/opportunities/new">
+              <Link href={`/team/opportunities/new?team=${teamProfile.id}`}>
                 <Button size="lg">
                   <Plus className="mr-2 h-5 w-5" />
                   Post Your First Opportunity

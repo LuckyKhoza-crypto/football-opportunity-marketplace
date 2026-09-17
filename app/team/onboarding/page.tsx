@@ -1,8 +1,9 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { useEffect, useState, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getSelectedTeamIdFromLocalStorage } from "@/lib/team-context";
+import { useEffect, useState, useCallback, Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -82,8 +83,18 @@ async function uploadTeamLogo(file: File): Promise<string> {
 }
 
 export default function TeamOnboardingPage() {
+  return (
+    <Suspense fallback={<div className="container mx-auto flex min-h-[calc(100vh-8rem)] items-center justify-center px-4 py-12"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>}>
+      <TeamOnboardingContent />
+    </Suspense>
+  );
+}
+
+function TeamOnboardingContent() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const teamId = searchParams.get("team") ?? getSelectedTeamIdFromLocalStorage();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
@@ -107,13 +118,25 @@ export default function TeamOnboardingPage() {
       if (!res.ok) return;
       const { teamProfile } = await res.json();
 
-      if (teamProfile) {
-        // Already has profile, go to team dashboard
-        router.push("/team");
+      // If the user already has a team and is NOT the multi-team admin,
+      // redirect to the team dashboard. The multi-team admin can create more.
+      if (teamProfile && !teamId) {
+        // Check if this is a multi-team admin by checking if they can create more
+        const listRes = await fetch("/api/team/list");
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          if (!listData.can_create_team) {
+            router.push("/team");
+            return;
+          }
+        } else {
+          router.push("/team");
+          return;
+        }
       }
     }
     checkExistingProfile();
-  }, [session, status, router]);
+  }, [session, status, router, teamId]);
 
   const validateStep = useCallback(
     (stepNumber: number): boolean => {

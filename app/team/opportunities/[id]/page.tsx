@@ -31,6 +31,7 @@ import {
   Shield,
 } from "lucide-react";
 import { OpportunityActionsClient } from "./OpportunityActionsClient";
+import { getSelectedTeamIdWithFallback, resolveSelectedTeam } from "@/lib/team-context-server";
 
 function formatDate(dateStr: string | null): string {
   if (!dateStr) return "Not set";
@@ -65,8 +66,10 @@ function InfoRow({
 
 export default async function OpportunityDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await getServerSession(authOptions);
 
@@ -86,11 +89,9 @@ export default async function OpportunityDetailPage({
     redirect("/onboarding");
   }
 
-  const { data: teamProfile } = await supabaseAdmin
-    .from("team_profiles")
-    .select("*")
-    .eq("user_id", profile.id)
-    .single();
+  const resolvedSearchParams = await searchParams;
+  const selectedTeamId = await getSelectedTeamIdWithFallback(resolvedSearchParams);
+  const teamProfile = await resolveSelectedTeam(profile.id, selectedTeamId);
 
   if (!teamProfile) {
     redirect("/team/onboarding");
@@ -119,7 +120,7 @@ export default async function OpportunityDetailPage({
       <div className="mx-auto max-w-3xl">
         {/* Back */}
         <div className="mb-6">
-          <Link href="/team/opportunities">
+          <Link href={`/team/opportunities?team=${teamProfile.id}`}>
             <Button variant="ghost" size="sm">
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Opportunities
@@ -148,6 +149,7 @@ export default async function OpportunityDetailPage({
             <OpportunityActionsClient
               opportunityId={opp.id}
               status={opp.status}
+              teamId={teamProfile.id}
             />
           </div>
         </div>

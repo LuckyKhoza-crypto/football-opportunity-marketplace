@@ -18,11 +18,18 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { player_profile_id, opportunity_id, message } = body;
+    const { player_profile_id, opportunity_id, message, team_id } = body;
 
     if (!player_profile_id || !opportunity_id || !message) {
       return NextResponse.json(
         { error: "player_profile_id, opportunity_id, and message are required" },
+        { status: 400 },
+      );
+    }
+
+    if (!team_id) {
+      return NextResponse.json(
+        { error: "team_id is required" },
         { status: 400 },
       );
     }
@@ -43,16 +50,17 @@ export async function POST(request: Request) {
 
     const userId = session.user.id;
 
-    // Check user has team role/profile
+    // Verify the specific team belongs to the user
     const { data: teamProfile } = await supabaseAdmin
       .from("team_profiles")
       .select("id, team_name, user_id")
       .eq("user_id", userId)
+      .eq("id", team_id)
       .single();
 
     if (!teamProfile) {
       return NextResponse.json(
-        { error: "Team profile not found. Complete team onboarding first." },
+        { error: "Team profile not found or access denied. Complete team onboarding first." },
         { status: 403 },
       );
     }
@@ -150,6 +158,7 @@ export async function POST(request: Request) {
         p_player_profile_id: player_profile_id,
         p_initial_message: message.trim(),
         p_user_id: userId,
+        p_team_profile_id: teamProfile.id,
       },
     );
 
@@ -244,11 +253,26 @@ export async function GET(request: Request) {
 
     if (context === "team") {
       // Team viewing their own outreach
-      const { data: teamProfile } = await supabaseAdmin
-        .from("team_profiles")
-        .select("id")
-        .eq("user_id", userId)
-        .single();
+      const teamIdParam = searchParams.get("team_id");
+
+      let teamProfile: { id: string } | null = null;
+
+      if (teamIdParam) {
+        const { data } = await supabaseAdmin
+          .from("team_profiles")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("id", teamIdParam)
+          .single();
+        teamProfile = data;
+      } else {
+        const { data } = await supabaseAdmin
+          .from("team_profiles")
+          .select("id")
+          .eq("user_id", userId)
+          .single();
+        teamProfile = data;
+      }
 
       if (!teamProfile) {
         return NextResponse.json({ outreach: [] });

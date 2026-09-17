@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getSelectedTeamIdFromLocalStorage } from "@/lib/team-context";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -21,6 +22,8 @@ interface TeamOpportunity {
 
 export function ContactPlayerDialog({ playerProfileId, onClose }: ContactPlayerDialogProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const teamId = searchParams.get("team") ?? getSelectedTeamIdFromLocalStorage();
   const [opportunities, setOpportunities] = useState<TeamOpportunity[]>([]);
   const [selectedOpportunity, setSelectedOpportunity] = useState("");
   const [message, setMessage] = useState("");
@@ -31,7 +34,7 @@ export function ContactPlayerDialog({ playerProfileId, onClose }: ContactPlayerD
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/team/opportunities");
+        const res = await fetch(`/api/team/opportunities${teamId ? `?team_id=${teamId}` : ""}`);
         const data = await res.json();
         if (res.ok) {
           const active = (data.opportunities ?? []).filter((o: TeamOpportunity) =>
@@ -46,7 +49,7 @@ export function ContactPlayerDialog({ playerProfileId, onClose }: ContactPlayerD
         setLoadingOpps(false);
       }
     })();
-  }, []);
+  }, [teamId]);
 
   const handleSubmit = useCallback(async () => {
     if (!selectedOpportunity || !message.trim() || loading) return;
@@ -60,6 +63,7 @@ export function ContactPlayerDialog({ playerProfileId, onClose }: ContactPlayerD
           player_profile_id: playerProfileId,
           opportunity_id: selectedOpportunity,
           message: message.trim(),
+          team_id: teamId,
         }),
       });
       const data = await res.json();

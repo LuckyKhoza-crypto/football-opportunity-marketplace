@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useAppView } from "@/lib/use-app-view";
 import { Button } from "@/components/ui/button";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
+import { TeamSwitcherWithContext } from "@/components/layout/TeamSwitcherWithContext";
 import { cn } from "@/lib/utils";
+import { getSelectedTeamIdFromLocalStorage } from "@/lib/team-context";
 
 const navItems = [
   { label: "Home", href: "/" },
@@ -34,6 +36,7 @@ const teamNavItems = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
   const { data: session } = useSession();
   const {
     view,
@@ -46,6 +49,44 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement>(null);
+  const [teams, setTeams] = useState<{ id: string; team_name: string; logo_url: string | null }[]>([]);
+  const [canCreateTeam, setCanCreateTeam] = useState(false);
+
+  // Read current team ID from URL on pathname change, fall back to localStorage
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("team");
+    if (fromUrl) {
+      setCurrentTeamId(fromUrl);
+    } else {
+      setCurrentTeamId(getSelectedTeamIdFromLocalStorage());
+    }
+  }, [pathname]);
+
+  // Fetch teams when in team view
+  useEffect(() => {
+    if (!isTeamView || !session?.user?.id) {
+      setTeams([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/team/list");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) {
+          setTeams(data.teams ?? []);
+          setCanCreateTeam(data.can_create_team ?? false);
+        }
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isTeamView, session?.user?.id]);
 
   // Close account menu on outside click
   useEffect(() => {
@@ -139,7 +180,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               teamNavItems.map((item) => (
                 <Link
                   key={item.href}
-                  href={item.href}
+                  href={currentTeamId ? `${item.href}?team=${currentTeamId}` : item.href}
                   className={cn(
                     "text-sm font-medium transition-colors hover:text-primary",
                     pathname === item.href
@@ -156,6 +197,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-2">
             {session?.user ? (
               <>
+                {isTeamView && teams.length > 0 && (
+                  <Suspense fallback={null}>
+                    <TeamSwitcherWithContext
+                      teams={teams}
+                      canCreateTeam={canCreateTeam}
+                    />
+                  </Suspense>
+                )}
                 <NotificationBell />
                 <div className="relative" ref={accountMenuRef}>
                 <button
@@ -332,7 +381,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 teamNavItems.map((item) => (
                   <Link
                     key={item.href}
-                    href={item.href}
+                    href={currentTeamId ? `${item.href}?team=${currentTeamId}` : item.href}
                     onClick={() => setMobileMenuOpen(false)}
                     className={cn(
                       "block rounded-md px-3 py-2 text-sm font-medium transition-colors hover:text-primary",

@@ -8,8 +8,13 @@ import { ArrowLeft, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import type { PlayerProfile } from "@/types";
+import { getSelectedTeamIdWithFallback, resolveSelectedTeam } from "@/lib/team-context-server";
 
-export default async function TeamPlayersBrowsePage() {
+export default async function TeamPlayersBrowsePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const session = await getServerSession(authOptions);
 
   if (!session?.user?.email) {
@@ -33,11 +38,9 @@ export default async function TeamPlayersBrowsePage() {
   }
 
   // Fetch team profile
-  const { data: teamProfile } = await supabaseAdmin
-    .from("team_profiles")
-    .select("*")
-    .eq("user_id", profile.id)
-    .single();
+  const resolvedSearchParams = await searchParams;
+  const selectedTeamId = await getSelectedTeamIdWithFallback(resolvedSearchParams);
+  const teamProfile = await resolveSelectedTeam(profile.id, selectedTeamId);
 
   if (!teamProfile) {
     redirect("/team/onboarding");
@@ -91,7 +94,7 @@ export default async function TeamPlayersBrowsePage() {
       <div className="mx-auto max-w-6xl">
         {/* Back */}
         <div className="mb-6">
-          <Link href="/team/find-players">
+          <Link href={`/team/find-players?team=${teamProfile.id}`}>
             <Button variant="ghost" size="sm">
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Find Players
@@ -113,6 +116,7 @@ export default async function TeamPlayersBrowsePage() {
           <TeamPlayerBrowseClient
             players={players}
             totalCount={players.length}
+            teamId={teamProfile.id}
           />
         </Suspense>
       </div>

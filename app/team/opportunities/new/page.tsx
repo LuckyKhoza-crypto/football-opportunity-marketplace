@@ -1,8 +1,9 @@
 "use client";
 
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { getSelectedTeamIdFromLocalStorage } from "@/lib/team-context";
+import { useEffect, useState, Suspense } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -91,8 +92,18 @@ const emptyFormData: FormData = {
 };
 
 export default function NewOpportunityPage() {
+  return (
+    <Suspense fallback={<div className="container mx-auto flex min-h-[calc(100vh-8rem)] items-center justify-center px-4 py-12"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>}>
+      <NewOpportunityContent />
+    </Suspense>
+  );
+}
+
+function NewOpportunityContent() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const teamId = searchParams.get("team") ?? getSelectedTeamIdFromLocalStorage();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState<FormData>({ ...emptyFormData });
@@ -227,6 +238,7 @@ export default function NewOpportunityPage() {
         radius: formData.radius ? parseInt(formData.radius) : null,
         tryout_date: formData.tryout_date || null,
         status,
+        team_id: teamId,
       };
 
       const res = await fetch("/api/team/opportunities", {
@@ -246,7 +258,7 @@ export default function NewOpportunityPage() {
         throw new Error(errorMessage);
       }
 
-      router.push("/team/opportunities");
+      router.push(teamId ? `/team/opportunities?team=${teamId}` : "/team/opportunities");
       router.refresh();
     } catch (err) {
       console.error("Failed to create opportunity:", err);
@@ -277,7 +289,7 @@ export default function NewOpportunityPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => router.push("/team/opportunities")}
+              onClick={() => router.push(teamId ? `/team/opportunities?team=${teamId}` : "/team/opportunities")}
             >
               <ArrowLeft className="mr-2 h-4 w-4" />
               Back to Opportunities
@@ -761,7 +773,7 @@ export default function NewOpportunityPage() {
         <div className="mt-8 flex flex-col gap-4 sm:flex-row sm:justify-between">
           <Button
             variant="outline"
-            onClick={() => router.push("/team/opportunities")}
+            onClick={() => router.push(teamId ? `/team/opportunities?team=${teamId}` : "/team/opportunities")}
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             Cancel

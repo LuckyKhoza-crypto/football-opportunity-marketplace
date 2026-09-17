@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { canManageMultipleTeams } from "@/lib/multi-team";
 
 function buildProfileData(
   body: Record<string, unknown>,
@@ -34,6 +35,23 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
+
+    // Check if the user already has a team profile.
+    // Normal users can only have one team. The multi-team admin can create more.
+    const { data: existingTeams } = await supabaseAdmin
+      .from("team_profiles")
+      .select("id")
+      .eq("user_id", session.user.id);
+
+    if (existingTeams && existingTeams.length > 0) {
+      const isAdmin = canManageMultipleTeams(session.user.id);
+      if (!isAdmin) {
+        return NextResponse.json(
+          { error: "You can only create one team profile" },
+          { status: 403 },
+        );
+      }
+    }
 
     const profileData = buildProfileData(body, session.user.id);
 
@@ -78,7 +96,7 @@ export async function POST(request: Request) {
   }
 }
 
-// Update the team profile for the authenticated user.
+// Update a team profile for the authenticated user.
 export async function PUT(request: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -91,12 +109,36 @@ export async function PUT(request: Request) {
     }
 
     const body = await request.json();
+    const teamId = body.team_id as string | undefined;
+
+    if (!teamId) {
+      return NextResponse.json(
+        { error: "team_id is required" },
+        { status: 400 },
+      );
+    }
+
+    // Verify the team belongs to the authenticated user
+    const { data: teamProfile } = await supabaseAdmin
+      .from("team_profiles")
+      .select("id")
+      .eq("id", teamId)
+      .eq("user_id", session.user.id)
+      .single();
+
+    if (!teamProfile) {
+      return NextResponse.json(
+        { error: "Team profile not found or access denied" },
+        { status: 404 },
+      );
+    }
 
     const profileData = buildProfileData(body, session.user.id);
 
     const { error: updateError } = await supabaseAdmin
       .from("team_profiles")
       .update(profileData)
+      .eq("id", teamId)
       .eq("user_id", session.user.id);
 
     if (updateError) {

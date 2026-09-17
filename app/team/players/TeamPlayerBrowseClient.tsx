@@ -38,6 +38,7 @@ interface PlayerWithMeta extends PlayerProfile {
 interface TeamPlayerBrowseClientProps {
   players: PlayerWithMeta[];
   totalCount: number;
+  teamId?: string | null;
 }
 
 const SORT_OPTIONS = [
@@ -51,6 +52,7 @@ const PAGE_SIZE = 20;
 export function TeamPlayerBrowseClient({
   players,
   totalCount,
+  teamId,
 }: TeamPlayerBrowseClientProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -83,9 +85,9 @@ export function TeamPlayerBrowseClient({
   );
 
   const clearFilters = useCallback(() => {
-    router.push("/team/players");
+    router.push(teamId ? `/team/players?team=${teamId}` : "/team/players");
     setCurrentPage(0);
-  }, [router]);
+  }, [router, teamId]);
 
   const hasActiveFilters =
     currentPosition ||

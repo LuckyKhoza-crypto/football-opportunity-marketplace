@@ -35,11 +35,10 @@ export async function POST(request: Request) {
       .eq("user_id", userId)
       .single();
 
-    const { data: teamProfile } = await supabaseAdmin
+    const { data: teamProfiles } = await supabaseAdmin
       .from("team_profiles")
       .select("id")
-      .eq("user_id", userId)
-      .single();
+      .eq("user_id", userId);
 
     // Check application access
     const { data: application } = await supabaseAdmin
@@ -63,7 +62,8 @@ export async function POST(request: Request) {
       .eq("id", application.opportunity_id)
       .single();
 
-    const isTeam = teamProfile && opportunity && opportunity.team_id === teamProfile.id;
+    const teamIds = (teamProfiles ?? []).map((t) => t.id);
+    const isTeam = teamIds.includes(opportunity?.team_id);
 
     if (!isPlayer && !isTeam) {
       return NextResponse.json(

@@ -8,25 +8,27 @@ import { Pencil, XCircle, Trash2, Users } from "lucide-react";
 interface OpportunityActionsClientProps {
   opportunityId: string;
   status: string;
+  teamId?: string | null;
 }
 
 export function OpportunityActionsClient({
   opportunityId,
   status,
+  teamId,
 }: OpportunityActionsClientProps) {
   const router = useRouter();
 
   return (
     <div className="flex flex-wrap gap-2">
       {status === "active" && (
-        <Link href={`/team/opportunities/${opportunityId}/players`}>
+        <Link href={`/team/opportunities/${opportunityId}/players${teamId ? `?team=${teamId}` : ""}`}>
           <Button variant="default">
             <Users className="mr-2 h-4 w-4" />
             Find Players
           </Button>
         </Link>
       )}
-      <Link href={`/team/opportunities/${opportunityId}/edit`}>
+      <Link href={`/team/opportunities/${opportunityId}/edit${teamId ? `?team=${teamId}` : ""}`}>
         <Button variant="outline">
           <Pencil className="mr-2 h-4 w-4" />
           Edit
