@@ -102,9 +102,9 @@ describe("Logged-Out Homepage", () => {
     expect(teamCta).toBe("Find Players");
   });
 
-  it("should show Browse Opportunities CTA", () => {
-    const browseCta = "Browse Opportunities";
-    expect(browseCta).toBe("Browse Opportunities");
+  it("should not show Browse Opportunities CTA in hero", () => {
+    const heroButtons = ["Get Started"];
+    expect(heroButtons).not.toContain("Browse Opportunities");
   });
 
   it("should show Get Started CTA for unauthenticated users", () => {
@@ -454,12 +454,11 @@ describe("Unauthorized Team Actions", () => {
 
 // ─── Test: Public Opportunity Discovery ─────────────────────────
 
-describe("Public Opportunity Discovery", () => {
-  it("should show opportunities to logged-out users", () => {
+describe("Opportunity Discovery", () => {
+  it("should require authentication to browse full opportunity discovery page", () => {
     const isAuthenticated = false;
-    const canBrowse = true;
-    expect(isAuthenticated).toBe(false);
-    expect(canBrowse).toBe(true);
+    const canBrowse = isAuthenticated;
+    expect(canBrowse).toBe(false);
   });
 
   it("should show Latest Opportunities on homepage", () => {
@@ -754,8 +753,7 @@ describe("Public vs Private Information", () => {
   });
 
   it("should keep public pages accessible", () => {
-    const publicRoutes = ["/opportunities", "/players", "/teams"];
-    expect(publicRoutes).toContain("/opportunities");
+    const publicRoutes = ["/players", "/teams"];
     expect(publicRoutes).toContain("/players");
     expect(publicRoutes).toContain("/teams");
   });

@@ -129,11 +129,6 @@ function HeroSection({ isAuthenticated, userRoles, profileName }: {
                 Get Started
               </Button>
             </Link>
-            <Link href="/opportunities">
-              <Button variant="outline" size="lg" className="min-w-[200px]">
-                Browse Opportunities
-              </Button>
-            </Link>
           </div>
         </div>
       </section>
@@ -141,7 +136,7 @@ function HeroSection({ isAuthenticated, userRoles, profileName }: {
   }
 
   return (
-    <section className="mb-8">
+    <section className="mb-8 text-center">
       <div className="flex flex-col gap-2">
         <h1 className="text-3xl font-bold tracking-tight">
           Welcome{profileName ? `, ${profileName}` : ""}
@@ -170,12 +165,12 @@ function MarketplaceCards({ isAuthenticated, userRoles }: {
   }
 
   return (
-    <section className="mb-12 grid gap-6 md:grid-cols-2">
+    <section className="mb-12 grid justify-center gap-6 md:grid-cols-2">
       {/* For Players Card */}
-      <Card className="relative overflow-hidden transition-shadow hover:shadow-lg">
+      <Card className="relative overflow-hidden text-center transition-shadow hover:shadow-lg">
         <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 -translate-y-8 rounded-full bg-primary/5" />
         <CardHeader>
-          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
             <User className="h-6 w-6 text-primary" />
           </div>
           <CardTitle className="text-xl">For Players</CardTitle>
@@ -213,10 +208,10 @@ function MarketplaceCards({ isAuthenticated, userRoles }: {
       </Card>
 
       {/* For Teams Card */}
-      <Card className="relative overflow-hidden transition-shadow hover:shadow-lg">
+      <Card className="relative overflow-hidden text-center transition-shadow hover:shadow-lg">
         <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 -translate-y-8 rounded-full bg-primary/5" />
         <CardHeader>
-          <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
             <Building2 className="h-6 w-6 text-primary" />
           </div>
           <CardTitle className="text-xl">For Teams</CardTitle>
@@ -263,7 +258,7 @@ function DualRoleViewSwitcher() {
     <section className="mb-8">
       <Card>
         <CardContent className="p-4">
-          <div className="flex flex-col items-center gap-4 sm:flex-row sm:justify-between">
+          <div className="flex flex-col items-center gap-4 text-center sm:flex-row sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold">Marketplace View</h2>
               <p className="text-sm text-muted-foreground">
@@ -299,7 +294,7 @@ function LatestOpportunitiesSection({ opportunities }: { opportunities: Opportun
   if (opportunities.length === 0) {
     return (
       <section className="mb-12">
-        <div className="mb-6">
+        <div className="mb-6 text-center">
           <h2 className="text-2xl font-bold">Latest Opportunities</h2>
           <p className="text-muted-foreground">Discover teams looking for players</p>
         </div>
@@ -310,7 +305,7 @@ function LatestOpportunitiesSection({ opportunities }: { opportunities: Opportun
             </div>
             <h3 className="mb-2 text-lg font-semibold">No opportunities available right now</h3>
             <p className="mb-4 max-w-md text-sm text-muted-foreground">
-              There aren&apos;t any active opportunities at the moment. Check back later or browse teams directly.
+              There aren't any active opportunities at the moment. Check back later or browse teams directly.
             </p>
             <Link href="/teams">
               <Button variant="outline" size="sm">
@@ -325,19 +320,11 @@ function LatestOpportunitiesSection({ opportunities }: { opportunities: Opportun
 
   return (
     <section className="mb-12">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold">Latest Opportunities</h2>
-          <p className="text-muted-foreground">Discover teams looking for players</p>
-        </div>
-        <Link href="/opportunities">
-          <Button variant="outline" size="sm">
-            View All Opportunities
-            <ArrowRight className="ml-1 h-4 w-4" />
-          </Button>
-        </Link>
+      <div className="mb-6 text-center">
+        <h2 className="text-2xl font-bold">Latest Opportunities</h2>
+        <p className="text-muted-foreground">Discover teams looking for players</p>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid justify-center gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {opportunities.map((opp) => (
           <OpportunityCard
             key={opp.id}
@@ -347,8 +334,173 @@ function LatestOpportunitiesSection({ opportunities }: { opportunities: Opportun
           />
         ))}
       </div>
+      <div className="mt-6 flex justify-center">
+        <Link href="/opportunities">
+          <Button variant="outline" size="sm">
+            View All Opportunities
+            <ArrowRight className="ml-1 h-4 w-4" />
+          </Button>
+        </Link>
+      </div>
     </section>
   );
+}
+
+function LatestPlayersSection({
+  recommendations,
+  hasTeamProfile,
+}: {
+  recommendations: TeamPlayerRecommendation[];
+  hasTeamProfile: boolean;
+}) {
+  if (!hasTeamProfile) {
+    return (
+      <section className="mb-12">
+        <div className="mb-6 text-center">
+          <h2 className="text-2xl font-bold">Latest Players</h2>
+          <p className="text-muted-foreground">Discover players looking for teams</p>
+        </div>
+        <Card>
+          <CardContent className="flex flex-col items-center py-12 text-center">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+              <Users className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <h3 className="mb-2 text-lg font-semibold">Complete your team profile to find players</h3>
+            <p className="mb-4 max-w-md text-sm text-muted-foreground">
+              Set up your team profile and post opportunities to start discovering players.
+            </p>
+            <Link href="/team/profile/edit">
+              <Button size="sm">
+                <Building2 className="mr-2 h-4 w-4" />
+                Complete Team Profile
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </section>
+    );
+  }
+
+  if (recommendations.length === 0) {
+    return (
+      <section className="mb-12">
+        <div className="mb-6 text-center">
+          <h2 className="text-2xl font-bold">Latest Players</h2>
+          <p className="text-muted-foreground">Discover players looking for teams</p>
+        </div>
+        <Card>
+          <CardContent className="flex flex-col items-center py-12 text-center">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+              <Users className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <h3 className="mb-2 text-lg font-semibold">No matching players found yet</h3>
+            <p className="mb-4 max-w-md text-sm text-muted-foreground">
+              Post an opportunity to attract players that match your requirements.
+            </p>
+            <Link href="/team/opportunities/new">
+              <Button size="sm">
+                <Plus className="mr-2 h-4 w-4" />
+                Post an Opportunity
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </section>
+    );
+  }
+
+  return (
+    <section className="mb-12">
+      <div className="mb-6 flex flex-col items-center gap-4 text-center">
+        <div>
+          <h2 className="text-2xl font-bold">Latest Players</h2>
+          <p className="text-muted-foreground">Discover players looking for teams</p>
+        </div>
+        <Link href="/team/find-players">
+          <Button variant="outline" size="sm">
+            View All Players
+            <ArrowRight className="ml-1 h-4 w-4" />
+          </Button>
+        </Link>
+      </div>
+      <div className="grid justify-center gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {recommendations.map((rec) => (
+          <Link
+            key={rec.id}
+            href={`/players/${rec.id}`}
+            className="group block"
+          >
+            <Card className="h-full transition-shadow hover:shadow-md">
+              <CardContent className="p-6">
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-muted">
+                      <User className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold">
+                        {rec.full_name ?? "Player"}
+                      </p>
+                      {rec.playing_level && (
+                        <p className="text-xs text-muted-foreground">
+                          {getLevelLabel(rec.playing_level)}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      {rec.positions.length > 0 && (
+                        <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                          {rec.positions.map((p) => POSITION_LABELS[p] ?? p).join(" / ")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                    {rec.location && (
+                      <span className="flex items-center gap-1">
+                        <MapPin className="h-3.5 w-3.5" />
+                        {rec.location}
+                      </span>
+                    )}
+                  </div>
+                  <div className="pt-1">
+                    <Button variant="outline" size="sm" className="group">
+                      View Player
+                      <ArrowRight className="ml-1 h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function LatestSection({
+  view,
+  opportunities,
+  teamPlayerRecommendations,
+  hasTeamProfile,
+}: {
+  view: "player" | "team" | null;
+  opportunities: OpportunityData[];
+  teamPlayerRecommendations: TeamPlayerRecommendation[];
+  hasTeamProfile: boolean;
+}) {
+  if (view === "team") {
+    return (
+      <LatestPlayersSection
+        recommendations={teamPlayerRecommendations}
+        hasTeamProfile={hasTeamProfile}
+      />
+    );
+  }
+  return <LatestOpportunitiesSection opportunities={opportunities} />;
 }
 
 function PlayerRecommendationsSection({
@@ -361,7 +513,7 @@ function PlayerRecommendationsSection({
   if (!hasPlayerProfile) {
     return (
       <section className="mb-12">
-        <div className="mb-6">
+        <div className="mb-6 text-center">
           <h2 className="text-2xl font-bold">Recommended for You</h2>
           <p className="text-muted-foreground">Personalized opportunity matches</p>
         </div>
@@ -389,7 +541,7 @@ function PlayerRecommendationsSection({
   if (recommendations.length === 0) {
     return (
       <section className="mb-12">
-        <div className="mb-6">
+        <div className="mb-6 text-center">
           <h2 className="text-2xl font-bold">Recommended for You</h2>
           <p className="text-muted-foreground">Personalized opportunity matches</p>
         </div>
@@ -415,7 +567,7 @@ function PlayerRecommendationsSection({
 
   return (
     <section className="mb-12">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-col items-center gap-4 text-center">
         <div>
           <h2 className="text-2xl font-bold">Recommended for You</h2>
           <p className="text-muted-foreground">Personalized opportunity matches based on your profile</p>
@@ -427,7 +579,7 @@ function PlayerRecommendationsSection({
           </Button>
         </Link>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid justify-center gap-4 sm:grid-cols-2">
         {recommendations.map((rec) => (
           <Link
             key={rec.id}
@@ -488,7 +640,7 @@ function TeamPlayerRecommendationsSection({
   if (!hasTeamProfile) {
     return (
       <section className="mb-12">
-        <div className="mb-6">
+        <div className="mb-6 text-center">
           <h2 className="text-2xl font-bold">Players You May Be Looking For</h2>
           <p className="text-muted-foreground">Discover talent for your team</p>
         </div>
@@ -516,7 +668,7 @@ function TeamPlayerRecommendationsSection({
   if (recommendations.length === 0) {
     return (
       <section className="mb-12">
-        <div className="mb-6">
+        <div className="mb-6 text-center">
           <h2 className="text-2xl font-bold">Players You May Be Looking For</h2>
           <p className="text-muted-foreground">Discover talent for your team</p>
         </div>
@@ -543,7 +695,7 @@ function TeamPlayerRecommendationsSection({
 
   return (
     <section className="mb-12">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-col items-center gap-4 text-center">
         <div>
           <h2 className="text-2xl font-bold">Players You May Be Looking For</h2>
           <p className="text-muted-foreground">Discover talent matching your requirements</p>
@@ -555,7 +707,7 @@ function TeamPlayerRecommendationsSection({
           </Button>
         </Link>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid justify-center gap-4 sm:grid-cols-2">
         {recommendations.map((rec) => (
           <Link
             key={rec.id}
@@ -615,7 +767,7 @@ function TeamActionsSection({ hasTeamProfile }: { hasTeamProfile: boolean }) {
   return (
     <section className="mb-12">
       <Card className="bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
-        <CardContent className="flex flex-col items-center gap-4 p-6 sm:flex-row sm:justify-between">
+        <CardContent className="flex flex-col items-center gap-4 p-6 text-center sm:flex-row sm:justify-between">
           <div>
             <h2 className="text-xl font-bold">Post an Opportunity</h2>
             <p className="text-sm text-muted-foreground">
@@ -645,12 +797,12 @@ function QuickLinks({ isAuthenticated, userRoles }: {
 
   return (
     <section className="mb-12">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid justify-center gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {hasPlayer && (
           <>
             <Link href="/player/find-team">
-              <Card className="transition-shadow hover:shadow-md cursor-pointer">
-                <CardContent className="flex items-center gap-3 p-4">
+              <Card className="text-center transition-shadow hover:shadow-md cursor-pointer">
+                <CardContent className="flex flex-col items-center gap-3 p-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                     <Target className="h-5 w-5 text-primary" />
                   </div>
@@ -662,8 +814,8 @@ function QuickLinks({ isAuthenticated, userRoles }: {
               </Card>
             </Link>
             <Link href="/player/applications">
-              <Card className="transition-shadow hover:shadow-md cursor-pointer">
-                <CardContent className="flex items-center gap-3 p-4">
+              <Card className="text-center transition-shadow hover:shadow-md cursor-pointer">
+                <CardContent className="flex flex-col items-center gap-3 p-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                     <FileText className="h-5 w-5 text-primary" />
                   </div>
@@ -675,8 +827,8 @@ function QuickLinks({ isAuthenticated, userRoles }: {
               </Card>
             </Link>
             <Link href="/player/profile">
-              <Card className="transition-shadow hover:shadow-md cursor-pointer">
-                <CardContent className="flex items-center gap-3 p-4">
+              <Card className="text-center transition-shadow hover:shadow-md cursor-pointer">
+                <CardContent className="flex flex-col items-center gap-3 p-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                     <User className="h-5 w-5 text-primary" />
                   </div>
@@ -692,8 +844,8 @@ function QuickLinks({ isAuthenticated, userRoles }: {
         {hasTeam && (
           <>
             <Link href="/team/find-players">
-              <Card className="transition-shadow hover:shadow-md cursor-pointer">
-                <CardContent className="flex items-center gap-3 p-4">
+              <Card className="text-center transition-shadow hover:shadow-md cursor-pointer">
+                <CardContent className="flex flex-col items-center gap-3 p-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                     <Search className="h-5 w-5 text-primary" />
                   </div>
@@ -705,8 +857,8 @@ function QuickLinks({ isAuthenticated, userRoles }: {
               </Card>
             </Link>
             <Link href="/team/opportunities">
-              <Card className="transition-shadow hover:shadow-md cursor-pointer">
-                <CardContent className="flex items-center gap-3 p-4">
+              <Card className="text-center transition-shadow hover:shadow-md cursor-pointer">
+                <CardContent className="flex flex-col items-center gap-3 p-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                     <Swords className="h-5 w-5 text-primary" />
                   </div>
@@ -718,8 +870,8 @@ function QuickLinks({ isAuthenticated, userRoles }: {
               </Card>
             </Link>
             <Link href="/team/applications">
-              <Card className="transition-shadow hover:shadow-md cursor-pointer">
-                <CardContent className="flex items-center gap-3 p-4">
+              <Card className="text-center transition-shadow hover:shadow-md cursor-pointer">
+                <CardContent className="flex flex-col items-center gap-3 p-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                     <Users className="h-5 w-5 text-primary" />
                   </div>
@@ -731,8 +883,8 @@ function QuickLinks({ isAuthenticated, userRoles }: {
               </Card>
             </Link>
             <Link href="/team/profile">
-              <Card className="transition-shadow hover:shadow-md cursor-pointer">
-                <CardContent className="flex items-center gap-3 p-4">
+              <Card className="text-center transition-shadow hover:shadow-md cursor-pointer">
+                <CardContent className="flex flex-col items-center gap-3 p-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
                     <Building2 className="h-5 w-5 text-primary" />
                   </div>
@@ -772,6 +924,13 @@ export function HomeClient({
   const showPlayerContent = !isAuthenticated || (isDualRole ? isPlayerView : hasPlayer);
   const showTeamContent = !isAuthenticated || (isDualRole ? isTeamView : hasTeam);
 
+  // Determine which "Latest" section to show based on the active view
+  const activeView = isAuthenticated && isDualRole
+    ? (isPlayerView ? "player" : isTeamView ? "team" : null)
+    : isAuthenticated
+      ? (hasPlayer ? "player" : hasTeam ? "team" : null)
+      : null;
+
   return (
     <div className="container mx-auto px-4 py-8 md:py-12">
       <div className="mx-auto max-w-6xl">
@@ -780,6 +939,14 @@ export function HomeClient({
           isAuthenticated={isAuthenticated}
           userRoles={userRoles}
           profileName={profileName}
+        />
+
+        {/* Latest section — shown right after hero, switches based on view */}
+        <LatestSection
+          view={activeView}
+          opportunities={latestOpportunities}
+          teamPlayerRecommendations={teamPlayerRecommendations}
+          hasTeamProfile={hasTeamProfile}
         />
 
         {/* Dual-role view switcher */}
@@ -816,9 +983,6 @@ export function HomeClient({
             />
           </>
         )}
-
-        {/* Latest Opportunities — shown to everyone */}
-        <LatestOpportunitiesSection opportunities={latestOpportunities} />
 
         {/* Logged-out: How it works section */}
         {!isAuthenticated && (

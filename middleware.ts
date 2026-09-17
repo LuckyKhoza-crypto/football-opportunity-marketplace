@@ -63,7 +63,6 @@ export default withAuth(
           "/favicon.ico",
           "/players",
           "/teams",
-          "/opportunities",
         ];
 
         const isPublicRoute = publicRoutes.some((route) =>
@@ -83,6 +82,7 @@ export default withAuth(
           "/onboarding",
           "/messages",
           "/notifications",
+          "/opportunities",
         ];
 
         const isProtectedRoute = protectedRoutes.some((route) =>
