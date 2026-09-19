@@ -106,48 +106,92 @@ function HeroSection({ isAuthenticated, userRoles, profileName }: {
   const hasPlayer = userRoles.includes("player");
   const hasTeam = userRoles.includes("team");
 
-  if (!isAuthenticated) {
-    return (
-      <section className="relative overflow-hidden rounded-xl bg-gradient-to-br from-primary/5 via-primary/10 to-background border px-6 py-16 md:px-12 md:py-24">
-        <div className="relative z-10 mx-auto max-w-3xl text-center">
-          <div className="mb-6 inline-flex items-center rounded-full bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary">
-            <Sparkles className="mr-1.5 h-4 w-4" />
-            Two-Sided Football Marketplace
-          </div>
-          <h1 className="mb-4 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
-            Find Your{" "}
-            <span className="text-primary">Next Football Opportunity</span>
-          </h1>
-          <p className="mx-auto mb-8 max-w-2xl text-lg text-muted-foreground">
-            The marketplace connecting football players with teams. Create your
-            profile, discover opportunities, and take the next step in your
-            football journey.
-          </p>
-          <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <Link href="/login">
-              <Button size="lg" className="min-w-[200px]">
-                Get Started
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </section>
-    );
-  }
+  // For logged-out users, link directly to discovery routes (they redirect to /login if needed)
+  // For authenticated users, link to role-appropriate routes
+  const playerCtaHref = !isAuthenticated || hasPlayer ? "/player/find-team" : "/login";
+  const teamCtaHref = !isAuthenticated || hasTeam ? "/team/find-players" : "/login";
+
+  const showPlayerCta = !isAuthenticated || hasPlayer;
+  const showTeamCta = !isAuthenticated || hasTeam;
 
   return (
-    <section className="mb-8 text-center">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-3xl font-bold tracking-tight">
-          Welcome{profileName ? `, ${profileName}` : ""}
-        </h1>
-        <p className="text-lg text-muted-foreground">
-          {hasPlayer && hasTeam
-            ? "Switch between Player and Team views to manage your marketplace experience."
-            : hasPlayer
-              ? "Find your next team and manage your football career."
-              : "Find talent and manage your team's opportunities."}
-        </p>
+    <section className="relative mb-8 overflow-hidden rounded-xl border">
+      {/* Background image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url('/images/fom-home-page-im-1.png')" }}
+        aria-hidden="true"
+      />
+      {/* Readability overlay — subtle so the football image remains visible */}
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60" />
+
+      <div className="relative z-10 mx-auto max-w-4xl px-6 py-16 text-center md:px-12 md:py-24">
+        {!isAuthenticated ? (
+          <>
+            <div className="mb-6 inline-flex items-center rounded-full bg-white/10 px-4 py-1.5 text-sm font-medium text-white backdrop-blur-sm">
+              <Sparkles className="mr-1.5 h-4 w-4" />
+              Two-Sided Football Marketplace
+            </div>
+            <h1 className="mb-4 text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl">
+              Find Your{" "}
+              <span className="text-primary">Next Football Opportunity</span>
+            </h1>
+            <p className="mx-auto mb-8 max-w-2xl text-lg text-white/90">
+              Find a team for your next opportunity, or find the player your team needs.
+            </p>
+            <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
+              <Link href={playerCtaHref}>
+                <Button size="lg" className="min-w-[200px]">
+                  <Target className="mr-2 h-4 w-4" />
+                  Find a Team
+                </Button>
+              </Link>
+              <Link href={teamCtaHref}>
+                <Button size="lg" variant="outline" className="min-w-[200px] border-white/60 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+                  <Search className="mr-2 h-4 w-4" />
+                  Find a Player
+                </Button>
+              </Link>
+            </div>
+            <div className="mt-6">
+              <Link href="/login" className="text-sm font-medium text-white/70 underline-offset-4 transition-colors hover:text-white hover:underline">
+                Get Started
+              </Link>
+            </div>
+          </>
+        ) : (
+          <>
+            <h1 className="mb-4 text-3xl font-bold tracking-tight text-white sm:text-4xl">
+              Welcome{profileName ? `, ${profileName}` : ""}
+            </h1>
+            <p className="mx-auto mb-8 max-w-2xl text-lg text-white/90">
+              {hasPlayer && hasTeam
+                ? "Switch between Player and Team views to manage your marketplace experience."
+                : hasPlayer
+                  ? "Find your next team and manage your football career."
+                  : "Find talent and manage your team's opportunities."}
+            </p>
+            <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
+              {showPlayerCta && (
+                <Link href={playerCtaHref}>
+                  <Button size="lg" className="min-w-[200px]">
+                    <Target className="mr-2 h-4 w-4" />
+                    Find a Team
+                  </Button>
+                </Link>
+              )}
+              {showTeamCta && (
+                <Link href={teamCtaHref}>
+                  <Button size="lg" variant="outline" className="min-w-[200px] border-white/60 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+                    <Search className="mr-2 h-4 w-4" />
+                    Find a Player
+                  </Button>
+                </Link>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </section>
   );
