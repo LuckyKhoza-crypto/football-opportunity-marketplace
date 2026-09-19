@@ -154,9 +154,9 @@ export default async function OpportunityDetailPage({ params }: PageProps) {
 
         {/* Personalized Match Banner */}
         {playerMatchResult && (
-          <Card className="mb-6 border-green-200 bg-green-50 dark:border-green-900/50 dark:bg-green-950/20">
+          <Card className="mb-6 border-orange-200 bg-orange-50 dark:border-orange-900/50 dark:bg-orange-950/20">
             <CardContent className="p-6">
-              <h2 className="mb-3 text-sm font-semibold text-green-700 dark:text-green-300">
+              <h2 className="mb-3 text-sm font-semibold text-orange-700 dark:text-orange-300">
                 Your Match
               </h2>
               <MatchDetails

@@ -285,14 +285,14 @@ export default async function ApplicationDetailPage({ params }: PageProps) {
 
               {/* Accepted Experience */}
               {appStatus === "accepted" && (
-                <div className="rounded-md bg-green-50 p-4 dark:bg-green-950/20">
+                <div className="rounded-md bg-orange-50 p-4 dark:bg-orange-950/20">
                   <div className="flex items-start gap-3">
-                    <Star className="mt-0.5 h-5 w-5 flex-shrink-0 text-green-600 dark:text-green-400" />
+                    <Star className="mt-0.5 h-5 w-5 flex-shrink-0 text-orange-600 dark:text-orange-400" />
                     <div>
-                      <p className="font-medium text-green-800 dark:text-green-300">
+                      <p className="font-medium text-orange-800 dark:text-orange-300">
                         Your application was accepted by this team.
                       </p>
-                      <p className="mt-1 text-sm text-green-700 dark:text-green-400">
+                      <p className="mt-1 text-sm text-orange-700 dark:text-orange-400">
                         No further actions are available at this time.
                       </p>
                     </div>

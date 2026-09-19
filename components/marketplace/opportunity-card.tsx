@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { POSITION_LABELS, PLAYING_LEVEL_LABELS, AVAILABILITY_LABELS, type Opportunity } from "@/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,26 +33,34 @@ export function OpportunityCard({ opportunity, teamName, teamLogo }: Opportunity
     : null;
 
   return (
-    <Card className="transition-shadow hover:shadow-md">
-      <CardContent className="p-6">
+    <Card className="relative overflow-hidden border-[rgba(255,255,255,0.14)] transition-shadow hover:shadow-md">
+      {/* Background image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url('/images/home-page-im3.jpg')" }}
+        aria-hidden="true"
+      />
+      <CardContent className="relative z-10 p-6">
         <div className="flex flex-col gap-4">
           {/* Team Info */}
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-muted">
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/10">
               {teamLogo ? (
-                <img
+                <Image
                   src={teamLogo}
                   alt={`${teamName ?? "Team"} logo`}
-                  className="h-10 w-10 rounded-lg object-cover"
+                  width={40}
+                  height={40}
+                  className="h-full w-full object-cover"
                 />
               ) : (
-                <Users className="h-5 w-5 text-muted-foreground" />
+                <Users className="h-5 w-5 text-[#D1D5DB]" />
               )}
             </div>
             <div>
-              <p className="text-sm font-semibold">{teamName ?? "Unknown Team"}</p>
+              <p className="text-sm font-semibold text-[#F5F5F5]">{teamName ?? "Unknown Team"}</p>
               {levelLabel && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-[#D1D5DB]">
                   {levelLabel}
                   {opportunity.league && <span> &middot; {opportunity.league}</span>}
                 </p>
@@ -61,22 +70,22 @@ export function OpportunityCard({ opportunity, teamName, teamLogo }: Opportunity
 
           {/* Opportunity Details */}
           <div>
-            <h3 className="text-base font-bold">{opportunity.title}</h3>
+            <h3 className="text-base font-bold text-white">{opportunity.title}</h3>
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+              <span className="inline-flex items-center rounded-md bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground shadow-sm">
                 {positionLabel}
               </span>
               {opportunity.role && (
-                <span className="text-xs text-muted-foreground">{opportunity.role}</span>
+                <span className="text-xs text-[#D1D5DB]">{opportunity.role}</span>
               )}
             </div>
           </div>
 
           {/* Meta Info */}
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-primary/80">
             {opportunity.location && (
               <span className="flex items-center gap-1">
-                <MapPin className="h-3.5 w-3.5" />
+                <MapPin className="h-3.5 w-3.5 text-primary" />
                 {opportunity.location}
               </span>
             )}
@@ -100,7 +109,10 @@ export function OpportunityCard({ opportunity, teamName, teamLogo }: Opportunity
           {/* CTA */}
           <div className="pt-1">
             <Link href={`/opportunities/${opportunity.id}`}>
-              <Button variant="outline" size="sm" className="group">
+              <Button
+                size="sm"
+                className="group border-0 bg-primary text-primary-foreground shadow-none hover:bg-primary/90 hover:text-primary-foreground"
+              >
                 View Opportunity
                 <ArrowRight className="ml-1 h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
               </Button>

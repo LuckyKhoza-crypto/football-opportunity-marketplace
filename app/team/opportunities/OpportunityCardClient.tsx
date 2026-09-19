@@ -34,8 +34,17 @@ export function OpportunityCard({
     : "Any Position";
 
   return (
-    <Card>
-      <CardContent className="p-6">
+    <Card className="relative overflow-hidden">
+      {/* Background image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url('/images/home-page-im3.jpg')" }}
+        aria-hidden="true"
+      />
+      {/* Readability overlay — subtle so the football image remains visible */}
+      <div className="absolute inset-0 bg-black/30" />
+
+      <CardContent className="relative z-10 p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex-1 space-y-2">
             <div className="flex items-center gap-2">

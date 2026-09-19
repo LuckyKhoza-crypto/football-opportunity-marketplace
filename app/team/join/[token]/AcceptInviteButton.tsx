@@ -70,7 +70,7 @@ export function AcceptInviteButton({
       </Button>
 
       {status === "success" && (
-        <p className="text-sm text-green-600">
+        <p className="text-sm text-orange-600">
           {"You've joined the team! Redirecting to your dashboard…"}
         </p>
       )}

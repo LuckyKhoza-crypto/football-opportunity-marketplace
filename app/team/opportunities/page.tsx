@@ -81,7 +81,7 @@ export default async function TeamOpportunitiesPage({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-3xl font-bold text-green-600 dark:text-green-400">
+              <p className="text-3xl font-bold text-orange-600 dark:text-orange-400">
                 {active.length}
               </p>
             </CardContent>

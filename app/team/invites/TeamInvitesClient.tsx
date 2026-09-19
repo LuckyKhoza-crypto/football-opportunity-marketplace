@@ -157,14 +157,14 @@ export function TeamInvitesClient({
                 title="Copy link"
               >
                 {copied ? (
-                  <Check className="h-4 w-4 text-green-600" />
+                  <Check className="h-4 w-4 text-orange-600" />
                 ) : (
                   <Copy className="h-4 w-4" />
                 )}
               </Button>
             </div>
             {copied && (
-              <p className="text-xs text-green-600">Copied to clipboard!</p>
+              <p className="text-xs text-orange-600">Copied to clipboard!</p>
             )}
           </div>
         )}

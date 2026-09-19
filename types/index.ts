@@ -261,7 +261,7 @@ export const OPPORTUNITY_STATUS_LABELS: Record<OpportunityStatus, string> = {
 
 export const OPPORTUNITY_STATUS_COLORS: Record<OpportunityStatus, string> = {
   draft: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
-  active: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  active: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   closed: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
 };
 
@@ -386,7 +386,7 @@ export const APPLICATION_STATUS_LABELS: Record<ApplicationStatus, string> = {
 export const APPLICATION_STATUS_COLORS: Record<ApplicationStatus, string> = {
   pending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
   reviewing: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
-  accepted: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  accepted: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   rejected: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
   withdrawn: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
 };

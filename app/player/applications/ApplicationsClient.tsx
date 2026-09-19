@@ -163,9 +163,9 @@ const MATCH_QUALITY_LABELS: Record<string, string> = {
 
 const MATCH_QUALITY_COLORS: Record<string, string> = {
   excellent:
-    "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   strong:
-    "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   possible:
     "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
   weak: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
@@ -835,13 +835,13 @@ export function ApplicationsClient() {
 
                         {/* Accepted Experience */}
                         {app.status === "accepted" && (
-                          <div className="flex items-start gap-2 rounded-md bg-green-50 p-3 text-sm text-green-700 dark:bg-green-950/20 dark:text-green-400">
+                          <div className="flex items-start gap-2 rounded-md bg-orange-50 p-3 text-sm text-orange-700 dark:bg-orange-950/20 dark:text-orange-400">
                             <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0" />
                             <div>
                               <p className="font-medium">
                                 Your application was accepted by this team.
                               </p>
-                              <p className="mt-1 text-green-600 dark:text-green-500">
+                              <p className="mt-1 text-orange-600 dark:text-orange-500">
                                 No further actions are available at this time.
                               </p>
                             </div>

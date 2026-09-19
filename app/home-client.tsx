@@ -81,8 +81,8 @@ function getLevelLabel(level: string | null): string {
 }
 
 const CLASSIFICATION_COLORS: Record<string, string> = {
-  excellent: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
-  strong: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+  excellent: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
+  strong: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   possible: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
   weak: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
   poor: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
@@ -106,48 +106,92 @@ function HeroSection({ isAuthenticated, userRoles, profileName }: {
   const hasPlayer = userRoles.includes("player");
   const hasTeam = userRoles.includes("team");
 
-  if (!isAuthenticated) {
-    return (
-      <section className="relative overflow-hidden rounded-xl bg-gradient-to-br from-primary/5 via-primary/10 to-background border px-6 py-16 md:px-12 md:py-24">
-        <div className="relative z-10 mx-auto max-w-3xl text-center">
-          <div className="mb-6 inline-flex items-center rounded-full bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary">
-            <Sparkles className="mr-1.5 h-4 w-4" />
-            Two-Sided Football Marketplace
-          </div>
-          <h1 className="mb-4 text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
-            Find Your{" "}
-            <span className="text-primary">Next Football Opportunity</span>
-          </h1>
-          <p className="mx-auto mb-8 max-w-2xl text-lg text-muted-foreground">
-            The marketplace connecting football players with teams. Create your
-            profile, discover opportunities, and take the next step in your
-            football journey.
-          </p>
-          <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <Link href="/login">
-              <Button size="lg" className="min-w-[200px]">
-                Get Started
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </section>
-    );
-  }
+  // For logged-out users, link directly to discovery routes (they redirect to /login if needed)
+  // For authenticated users, link to role-appropriate routes
+  const playerCtaHref = !isAuthenticated || hasPlayer ? "/player/find-team" : "/login";
+  const teamCtaHref = !isAuthenticated || hasTeam ? "/team/find-players" : "/login";
+
+  const showPlayerCta = !isAuthenticated || hasPlayer;
+  const showTeamCta = !isAuthenticated || hasTeam;
 
   return (
-    <section className="mb-8 text-center">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-3xl font-bold tracking-tight">
-          Welcome{profileName ? `, ${profileName}` : ""}
-        </h1>
-        <p className="text-lg text-muted-foreground">
-          {hasPlayer && hasTeam
-            ? "Switch between Player and Team views to manage your marketplace experience."
-            : hasPlayer
-              ? "Find your next team and manage your football career."
-              : "Find talent and manage your team's opportunities."}
-        </p>
+    <section className="relative mb-8 overflow-hidden">
+      {/* Background image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url('/images/fom-home-page-im-1.png')" }}
+        aria-hidden="true"
+      />
+      {/* Readability overlay — subtle so the football image remains visible */}
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60" />
+
+      <div className="relative z-10 mx-auto flex min-h-[60vh] max-w-4xl flex-col items-center justify-center px-6 py-24 text-center md:min-h-[70vh] md:px-12 md:py-32">
+        {!isAuthenticated ? (
+          <>
+            <div className="mb-6 inline-flex items-center rounded-full bg-white/10 px-4 py-1.5 text-sm font-medium text-white backdrop-blur-sm">
+              <Sparkles className="mr-1.5 h-4 w-4" />
+              Two-Sided Football Marketplace
+            </div>
+            <h1 className="mb-4 text-4xl font-bold tracking-tight text-white sm:text-5xl lg:text-6xl">
+              Find Your{" "}
+              <span className="text-primary">Next Football Opportunity</span>
+            </h1>
+            <p className="mx-auto mb-8 max-w-2xl text-lg text-white/90">
+              Find a team for your next opportunity, or find the player your team needs.
+            </p>
+            <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
+              <Link href={playerCtaHref}>
+                <Button size="lg" className="min-w-[200px]">
+                  <Target className="mr-2 h-4 w-4" />
+                  Find a Team
+                </Button>
+              </Link>
+              <Link href={teamCtaHref}>
+                <Button size="lg" variant="outline" className="min-w-[200px] border-white/60 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+                  <Search className="mr-2 h-4 w-4" />
+                  Find a Player
+                </Button>
+              </Link>
+            </div>
+            <div className="mt-6">
+              <Link href="/login" className="text-sm font-medium text-white/70 underline-offset-4 transition-colors hover:text-white hover:underline">
+                Get Started
+              </Link>
+            </div>
+          </>
+        ) : (
+          <>
+            <h1 className="mb-4 text-3xl font-bold tracking-tight text-white sm:text-4xl">
+              Welcome{profileName ? `, ${profileName}` : ""}
+            </h1>
+            <p className="mx-auto mb-8 max-w-2xl text-lg text-white/90">
+              {hasPlayer && hasTeam
+                ? "Switch between Player and Team views to manage your marketplace experience."
+                : hasPlayer
+                  ? "Find your next team and manage your football career."
+                  : "Find talent and manage your team's opportunities."}
+            </p>
+            <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
+              {showPlayerCta && (
+                <Link href={playerCtaHref}>
+                  <Button size="lg" className="min-w-[200px]">
+                    <Target className="mr-2 h-4 w-4" />
+                    Find a Team
+                  </Button>
+                </Link>
+              )}
+              {showTeamCta && (
+                <Link href={teamCtaHref}>
+                  <Button size="lg" variant="outline" className="min-w-[200px] border-white/60 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+                    <Search className="mr-2 h-4 w-4" />
+                    Find a Player
+                  </Button>
+                </Link>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </section>
   );
@@ -168,84 +212,102 @@ function MarketplaceCards({ isAuthenticated, userRoles }: {
     <section className="mb-12 grid justify-center gap-6 md:grid-cols-2">
       {/* For Players Card */}
       <Card className="relative overflow-hidden text-center transition-shadow hover:shadow-lg">
-        <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 -translate-y-8 rounded-full bg-primary/5" />
-        <CardHeader>
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-            <User className="h-6 w-6 text-primary" />
-          </div>
-          <CardTitle className="text-xl">For Players</CardTitle>
-          <CardDescription>
-            Find your next team and take your career to the next level
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <ul className="space-y-2 text-sm text-muted-foreground">
-            <li className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-              Find teams looking for your position
-            </li>
-            <li className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-              Discover opportunities matched to your profile
-            </li>
-            <li className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-              Get matched based on your skills and preferences
-            </li>
-            <li className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-              Track your applications in one place
-            </li>
-          </ul>
-          <Link href={isAuthenticated && hasPlayer ? "/player/find-team" : "/login"}>
-            <Button className="w-full" size="lg">
-              <Target className="mr-2 h-4 w-4" />
-              Find a Team
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
-          </Link>
-        </CardContent>
+        {/* Full-card background image */}
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: "url('/images/home-page-for-players-im.jpg')" }}
+          aria-hidden="true"
+        />
+        {/* Readability overlay */}
+        <div className="absolute inset-0 bg-black/50" />
+        <div className="relative z-10 flex h-full flex-col p-6">
+          <CardHeader>
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-white/10">
+              <User className="h-6 w-6 text-white" />
+            </div>
+            <CardTitle className="text-xl text-orange-400">For Players</CardTitle>
+            <CardDescription className="text-white/90">
+              Find your next team and take your career to the next level
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <ul className="space-y-2 text-sm text-white/90">
+              <li className="flex items-center gap-2">
+                <div className="h-1.5 w-1.5 rounded-full bg-white" />
+                Find teams looking for your position
+              </li>
+              <li className="flex items-center gap-2">
+                <div className="h-1.5 w-1.5 rounded-full bg-white" />
+                Discover opportunities matched to your profile
+              </li>
+              <li className="flex items-center gap-2">
+                <div className="h-1.5 w-1.5 rounded-full bg-white" />
+                Get matched based on your skills and preferences
+              </li>
+              <li className="flex items-center gap-2">
+                <div className="h-1.5 w-1.5 rounded-full bg-white" />
+                Track your applications in one place
+              </li>
+            </ul>
+            <Link href={isAuthenticated && hasPlayer ? "/player/find-team" : "/login"}>
+              <Button className="w-full" size="lg">
+                <Target className="mr-2 h-4 w-4" />
+                Find a Team
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </Link>
+          </CardContent>
+        </div>
       </Card>
 
       {/* For Teams Card */}
       <Card className="relative overflow-hidden text-center transition-shadow hover:shadow-lg">
-        <div className="absolute right-0 top-0 h-32 w-32 translate-x-8 -translate-y-8 rounded-full bg-primary/5" />
-        <CardHeader>
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-            <Building2 className="h-6 w-6 text-primary" />
-          </div>
-          <CardTitle className="text-xl">For Teams</CardTitle>
-          <CardDescription>
-            Find the talent your team needs to succeed
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <ul className="space-y-2 text-sm text-muted-foreground">
-            <li className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-              Find players matching your requirements
-            </li>
-            <li className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-              Post opportunities and attract top talent
-            </li>
-            <li className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-              Discover matching players automatically
-            </li>
-            <li className="flex items-center gap-2">
-              <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-              Manage applications efficiently
-            </li>
-          </ul>
-          <Link href={isAuthenticated && hasTeam ? "/team/find-players" : "/login"}>
-            <Button className="w-full" size="lg">
-              <Search className="mr-2 h-4 w-4" />
-              Find Players
-              <ArrowRight className="ml-2 h-4 w-4" />
-            </Button>
-          </Link>
-        </CardContent>
+        {/* Full-card background image */}
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: "url('/images/home-page-for-teams-im.jpg')" }}
+          aria-hidden="true"
+        />
+        {/* Readability overlay */}
+        <div className="absolute inset-0 bg-black/50" />
+        <div className="relative z-10 flex h-full flex-col p-6">
+          <CardHeader>
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-lg bg-white/10">
+              <Building2 className="h-6 w-6 text-white" />
+            </div>
+            <CardTitle className="text-xl text-orange-400">For Teams</CardTitle>
+            <CardDescription className="text-white/90">
+              Find the talent your team needs to succeed
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <ul className="space-y-2 text-sm text-white/90">
+              <li className="flex items-center gap-2">
+                <div className="h-1.5 w-1.5 rounded-full bg-white" />
+                Find players matching your requirements
+              </li>
+              <li className="flex items-center gap-2">
+                <div className="h-1.5 w-1.5 rounded-full bg-white" />
+                Post opportunities and attract top talent
+              </li>
+              <li className="flex items-center gap-2">
+                <div className="h-1.5 w-1.5 rounded-full bg-white" />
+                Discover matching players automatically
+              </li>
+              <li className="flex items-center gap-2">
+                <div className="h-1.5 w-1.5 rounded-full bg-white" />
+                Manage applications efficiently
+              </li>
+            </ul>
+            <Link href={isAuthenticated && hasTeam ? "/team/find-players" : "/login"}>
+              <Button className="w-full" size="lg">
+                <Search className="mr-2 h-4 w-4" />
+                Find Players
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </Link>
+          </CardContent>
+        </div>
       </Card>
     </section>
   );
@@ -936,15 +998,16 @@ export function HomeClient({
       : null;
 
   return (
-    <div className="container mx-auto px-4 py-8 md:py-12">
-      <div className="mx-auto max-w-6xl">
-        {/* Hero Section */}
-        <HeroSection
-          isAuthenticated={isAuthenticated}
-          userRoles={userRoles}
-          profileName={profileName}
-        />
+    <div className="py-8 md:py-12">
+      {/* Hero Section — full-bleed, spans the entire viewport width */}
+      <HeroSection
+        isAuthenticated={isAuthenticated}
+        userRoles={userRoles}
+        profileName={profileName}
+      />
 
+      <div className="container mx-auto px-4">
+        <div className="mx-auto max-w-6xl">
         {/* Latest section — shown right after hero, switches based on view */}
         <LatestSection
           view={activeView}
@@ -1033,6 +1096,7 @@ export function HomeClient({
             </div>
           </section>
         )}
+        </div>
       </div>
     </div>
   );

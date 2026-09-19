@@ -24,9 +24,9 @@ const CLASSIFICATION_LABELS: Record<string, string> = {
 
 const CLASSIFICATION_COLORS: Record<string, string> = {
   excellent:
-    "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   strong:
-    "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   possible:
     "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
   weak: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
@@ -73,10 +73,10 @@ function getFactorLevelLabel(
 
   const ratio = contribution / maxContribution;
   if (ratio >= 0.9) {
-    return { label: "Excellent", color: "text-green-600 dark:text-green-400" };
+    return { label: "Excellent", color: "text-orange-600 dark:text-orange-400" };
   }
   if (ratio >= 0.6) {
-    return { label: "Good", color: "text-emerald-600 dark:text-emerald-400" };
+    return { label: "Good", color: "text-orange-600 dark:text-orange-400" };
   }
   if (ratio >= 0.3) {
     return { label: "Fair", color: "text-yellow-600 dark:text-yellow-400" };
@@ -249,7 +249,7 @@ export function MatchDetails({
   // Reasons
   const reasonsDisplay = showReasons && hasReasons ? (
     <div>
-      <p className="mb-1 text-xs font-medium text-green-600 dark:text-green-400">
+      <p className="mb-1 text-xs font-medium text-orange-600 dark:text-orange-400">
         Why this matches
       </p>
       <ul className="space-y-1">
@@ -258,7 +258,7 @@ export function MatchDetails({
             key={i}
             className="flex items-start gap-1.5 text-xs text-muted-foreground"
           >
-            <CheckCircle2 className="mt-0.5 h-3 w-3 flex-shrink-0 text-green-500" />
+            <CheckCircle2 className="mt-0.5 h-3 w-3 flex-shrink-0 text-orange-500" />
             {reason.replace(/^✓\s*/, "")}
           </li>
         ))}

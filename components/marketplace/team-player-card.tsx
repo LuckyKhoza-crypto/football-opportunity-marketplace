@@ -32,13 +32,6 @@ function calculateAge(dob: string | null): number | null {
   return age;
 }
 
-function formatPositions(positions: string[]): string {
-  if (!positions || positions.length === 0) return "Any Position";
-  return positions
-    .map((p) => POSITION_LABELS[p] ?? p)
-    .join(" / ");
-}
-
 const CLASSIFICATION_LABELS: Record<string, string> = {
   excellent: "Excellent Match",
   strong: "Strong Match",
@@ -49,9 +42,9 @@ const CLASSIFICATION_LABELS: Record<string, string> = {
 
 const CLASSIFICATION_COLORS: Record<string, string> = {
   excellent:
-    "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   strong:
-    "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
   possible:
     "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
   weak: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
@@ -73,7 +66,6 @@ export function TeamPlayerCard({
   const { classification } = matchResult;
 
   const age = calculateAge(player.date_of_birth);
-  const primaryPosition = player.positions?.[0] ?? null;
   const secondaryPositions = player.positions?.slice(1) ?? [];
   const levelLabel = player.playing_level
     ? PLAYING_LEVEL_LABELS[player.playing_level] ?? player.playing_level
@@ -125,11 +117,6 @@ export function TeamPlayerCard({
               <p className="truncate text-base font-bold">
                 {player.full_name ?? "Unknown Player"}
               </p>
-              {primaryPosition && (
-                <p className="text-sm font-medium text-primary">
-                  {formatPositions(player.positions ?? [])}
-                </p>
-              )}
             </div>
           </div>
 
