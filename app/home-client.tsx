@@ -290,7 +290,7 @@ function DualRoleViewSwitcher() {
   );
 }
 
-function LatestOpportunitiesSection({ opportunities }: { opportunities: OpportunityData[] }) {
+function LatestOpportunitiesSection({ opportunities, isAuthenticated }: { opportunities: OpportunityData[]; isAuthenticated: boolean }) {
   if (opportunities.length === 0) {
     return (
       <section className="mb-12">
@@ -305,7 +305,7 @@ function LatestOpportunitiesSection({ opportunities }: { opportunities: Opportun
             </div>
             <h3 className="mb-2 text-lg font-semibold">No opportunities available right now</h3>
             <p className="mb-4 max-w-md text-sm text-muted-foreground">
-              There aren't any active opportunities at the moment. Check back later or browse teams directly.
+              There aren&apos;t any active opportunities at the moment. Check back later or browse teams directly.
             </p>
             <Link href="/teams">
               <Button variant="outline" size="sm">
@@ -323,6 +323,14 @@ function LatestOpportunitiesSection({ opportunities }: { opportunities: Opportun
       <div className="mb-6 text-center">
         <h2 className="text-2xl font-bold">Latest Opportunities</h2>
         <p className="text-muted-foreground">Discover teams looking for players</p>
+        {!isAuthenticated && (
+          <div className="mt-3 flex justify-center">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">
+              <Swords className="h-4 w-4" />
+              100+ Opportunities
+            </span>
+          </div>
+        )}
       </div>
       <div className="grid justify-center gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {opportunities.map((opp) => (
@@ -486,11 +494,13 @@ function LatestSection({
   opportunities,
   teamPlayerRecommendations,
   hasTeamProfile,
+  isAuthenticated,
 }: {
   view: "player" | "team" | null;
   opportunities: OpportunityData[];
   teamPlayerRecommendations: TeamPlayerRecommendation[];
   hasTeamProfile: boolean;
+  isAuthenticated: boolean;
 }) {
   if (view === "team") {
     return (
@@ -500,7 +510,7 @@ function LatestSection({
       />
     );
   }
-  return <LatestOpportunitiesSection opportunities={opportunities} />;
+  return <LatestOpportunitiesSection opportunities={opportunities} isAuthenticated={isAuthenticated} />;
 }
 
 function PlayerRecommendationsSection({
@@ -941,6 +951,7 @@ export function HomeClient({
           opportunities={latestOpportunities}
           teamPlayerRecommendations={teamPlayerRecommendations}
           hasTeamProfile={hasTeamProfile}
+          isAuthenticated={isAuthenticated}
         />
 
         {/* Dual-role view switcher */}
