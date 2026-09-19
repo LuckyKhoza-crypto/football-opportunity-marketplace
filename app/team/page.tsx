@@ -261,7 +261,7 @@ export default async function TeamDashboardPage({
                   <div className="space-y-3">
                     <div className="flex justify-between text-sm">
                       <span className="flex items-center gap-1">
-                        <span className="h-2 w-2 rounded-full bg-green-500" />
+                        <span className="h-2 w-2 rounded-full bg-orange-500" />
                         Active
                       </span>
                       <span className="font-bold">{activeCount}</span>

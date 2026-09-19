@@ -40,6 +40,38 @@ export default function AcknowledgementsPage() {
                 Unsplash
               </a>
             </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Photo by{" "}
+              <a
+                href="https://unsplash.com/@jannesglas?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText"
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Jannes Glas
+              </a>{" "}
+              on{" "}
+              <a
+                href="https://unsplash.com/photos/timelapse-photo-of-soccer-player-kicking-ball-cuhQcfp3By4?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText"
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Unsplash
+              </a>
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Photo by{" "}
+              <a
+                href="https://unsplash.com/@omarvellous14?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText"
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Omar Ramadan
+              </a>{" "}
+              on{" "}
+              <a
+                href="https://unsplash.com/photos/a-group-of-soccer-players-huddle-together-on-the-field-qTiI9tOHs14?utm_source=unsplash&utm_medium=referral&utm_content=creditCopyText"
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Unsplash
+              </a>
+            </p>
           </div>
 
           <div className="flex justify-center">

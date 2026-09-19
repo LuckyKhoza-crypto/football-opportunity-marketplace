@@ -188,8 +188,8 @@ function calculateAge(dob: string | null): number | null {
 
 function getMatchQualityColor(classification: string): string {
   const colors: Record<string, string> = {
-    excellent: "text-green-600 dark:text-green-400",
-    strong: "text-emerald-600 dark:text-emerald-400",
+    excellent: "text-orange-600 dark:text-orange-400",
+    strong: "text-orange-600 dark:text-orange-400",
     possible: "text-blue-600 dark:text-blue-400",
     weak: "text-yellow-600 dark:text-yellow-400",
     poor: "text-red-600 dark:text-red-400",
@@ -199,8 +199,8 @@ function getMatchQualityColor(classification: string): string {
 
 function getMatchQualityBg(classification: string): string {
   const colors: Record<string, string> = {
-    excellent: "bg-green-100 dark:bg-green-900/30",
-    strong: "bg-emerald-100 dark:bg-emerald-900/30",
+    excellent: "bg-orange-100 dark:bg-orange-900/30",
+    strong: "bg-orange-100 dark:bg-orange-900/30",
     possible: "bg-blue-100 dark:bg-blue-900/30",
     weak: "bg-yellow-100 dark:bg-yellow-900/30",
     poor: "bg-red-100 dark:bg-red-900/30",
@@ -930,7 +930,7 @@ export function TeamApplicationsClient({ teamId }: { teamId?: string | null }) {
                         </>
                       )}
                       {app.status === "accepted" && (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-3 py-1 text-xs font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
                           <CheckCircle2 className="h-3.5 w-3.5" />
                           Accepted
                         </span>

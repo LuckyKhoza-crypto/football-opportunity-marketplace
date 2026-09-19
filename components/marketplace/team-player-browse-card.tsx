@@ -30,13 +30,6 @@ function calculateAge(dob: string | null): number | null {
   return age;
 }
 
-function formatPositions(positions: string[]): string {
-  if (!positions || positions.length === 0) return "Any Position";
-  return positions
-    .map((p) => POSITION_LABELS[p] ?? p)
-    .join(" / ");
-}
-
 interface TeamPlayerBrowseCardProps {
   player: PlayerProfile & {
     full_name?: string | null;
@@ -48,7 +41,6 @@ export function TeamPlayerBrowseCard({
   player,
 }: TeamPlayerBrowseCardProps) {
   const age = calculateAge(player.date_of_birth);
-  const primaryPosition = player.positions?.[0] ?? null;
   const secondaryPositions = player.positions?.slice(1) ?? [];
   const levelLabel = player.playing_level
     ? PLAYING_LEVEL_LABELS[player.playing_level] ?? player.playing_level
@@ -81,11 +73,6 @@ export function TeamPlayerBrowseCard({
               <p className="truncate text-base font-bold">
                 {player.full_name ?? "Unknown Player"}
               </p>
-              {primaryPosition && (
-                <p className="text-sm font-medium text-primary">
-                  {formatPositions(player.positions ?? [])}
-                </p>
-              )}
             </div>
           </div>
 

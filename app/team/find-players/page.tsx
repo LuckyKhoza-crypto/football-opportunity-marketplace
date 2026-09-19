@@ -198,7 +198,7 @@ export default async function TeamFindPlayersPage({
                             )}
                           </div>
                         </div>
-                        <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-400">
+                        <span className="inline-flex items-center rounded-full bg-orange-100 px-2.5 py-0.5 text-xs font-medium text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
                           {OPPORTUNITY_STATUS_LABELS[opp.status]}
                         </span>
                       </div>
