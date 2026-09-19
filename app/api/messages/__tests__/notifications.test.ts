@@ -703,6 +703,7 @@ describe("Applications API - Status Change Notifications", () => {
               opportunity: {
                 team_id: "team-1",
                 title: "Striker Opportunity",
+                position: "ST",
                 team: { user_id: "team-user-2", team_name: "Phoenix United" },
               },
               player_profile: { user_id: "player-user-1" },
@@ -713,24 +714,38 @@ describe("Applications API - Status Change Notifications", () => {
       })),
     } as any));
 
-    // Mock the status update
+    // Mock the accept_application RPC (TEAM-005: atomic acceptance)
+    vi.mocked(supabaseAdmin.rpc).mockResolvedValue({
+      data: {
+        success: true,
+        created: true,
+        already_member: false,
+        already_accepted: false,
+        membership_id: "membership-1",
+        team_profile_id: "team-1",
+        player_profile_id: "player-profile-1",
+        position: "ST",
+        role: "Poacher",
+      },
+      error: null,
+    } as any);
+
+    // Mock the updated application fetch
     vi.mocked(supabaseAdmin.from).mockImplementationOnce(() => ({
-      update: vi.fn(() => ({
+      select: vi.fn(() => ({
         eq: vi.fn(() => ({
-          select: vi.fn(() => ({
-            single: vi.fn().mockResolvedValue({
-              data: {
-                id: "app-1",
-                status: "accepted",
-                opportunity_id: "opp-1",
-                player_profile_id: "player-profile-1",
-                cover_message: null,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              },
-              error: null,
-            }),
-          })),
+          single: vi.fn().mockResolvedValue({
+            data: {
+              id: "app-1",
+              status: "accepted",
+              opportunity_id: "opp-1",
+              player_profile_id: "player-profile-1",
+              cover_message: null,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+            error: null,
+          }),
         })),
       })),
     } as any));
@@ -753,7 +768,7 @@ describe("Applications API - Status Change Notifications", () => {
         userId: "player-user-1",
         type: "application_status_changed",
         title: "Application updated",
-        body: "Your application for Striker Opportunity at Phoenix United is now Accepted.",
+        body: "Phoenix United has accepted your application for Striker.",
         link: "/player/applications/app-1",
       }),
     );

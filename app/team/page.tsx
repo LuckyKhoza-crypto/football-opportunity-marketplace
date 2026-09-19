@@ -14,7 +14,7 @@ import {
   type TeamProfile,
   type Opportunity,
 } from "@/types";
-import { MapPin, Users, Trophy, Plus, ArrowRight, Swords, Search } from "lucide-react";
+import { MapPin, Users, Trophy, Plus, ArrowRight, Swords, Search, Link2 } from "lucide-react";
 import { getSelectedTeamIdWithFallback, resolveSelectedTeam } from "@/lib/team-context-server";
 
 export default async function TeamDashboardPage({
@@ -234,6 +234,12 @@ export default async function TeamDashboardPage({
                   <Button variant="default" className="w-full justify-start">
                     <Search className="mr-2 h-4 w-4" />
                     Find Players
+                  </Button>
+                </Link>
+                <Link href={`/team/invites?team=${typedProfile.id}`}>
+                  <Button variant="outline" className="w-full justify-start">
+                    <Link2 className="mr-2 h-4 w-4" />
+                    Manage Invite Links
                   </Button>
                 </Link>
                 <Link href={`/team/opportunities?team=${typedProfile.id}`}>

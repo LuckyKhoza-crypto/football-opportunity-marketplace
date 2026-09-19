@@ -7,6 +7,11 @@ export default withAuth(
     const pathname = req.nextUrl.pathname;
     const userRoles = (token?.roles as string[] | undefined) ?? [];
 
+    // Team invite join pages are public - never apply team-role checks here.
+    if (pathname.startsWith("/team/join")) {
+      return NextResponse.next();
+    }
+
     // Route context detection
     // Player management routes
     const playerRoutes = ["/player", "/player/onboarding", "/player/profile", "/player/find-team", "/player/applications"];
@@ -63,6 +68,7 @@ export default withAuth(
           "/favicon.ico",
           "/players",
           "/teams",
+          "/team/join",
         ];
 
         const isPublicRoute = publicRoutes.some((route) =>

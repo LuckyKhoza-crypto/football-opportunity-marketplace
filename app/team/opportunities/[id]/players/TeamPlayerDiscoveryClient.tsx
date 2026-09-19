@@ -50,10 +50,10 @@ interface TeamPlayerDiscoveryClientProps {
 }
 
 const MIN_MATCH_OPTIONS = [
-  { value: "0", label: "Any match" },
-  { value: "60", label: "60%+" },
-  { value: "75", label: "75%+" },
-  { value: "90", label: "90%+" },
+  { value: "all", label: "Any match" },
+  { value: "excellent", label: "Excellent" },
+  { value: "strong", label: "Strong+" },
+  { value: "possible", label: "Possible+" },
 ];
 
 const SORT_OPTIONS = [
@@ -82,7 +82,7 @@ export function TeamPlayerDiscoveryClient({
   const currentLocation = searchParams.get("location") ?? "";
   const currentAvailability = searchParams.get("availability") ?? "";
   const currentFoot = searchParams.get("foot") ?? "";
-  const currentMinMatch = searchParams.get("minMatch") ?? "0";
+  const currentMinMatch = searchParams.get("minMatch") ?? "all";
   const currentSort = searchParams.get("sort") ?? "match";
 
   const updateParams = useCallback(
@@ -126,7 +126,7 @@ export function TeamPlayerDiscoveryClient({
     currentAvailability ||
     currentFoot ||
     currentQ ||
-    currentMinMatch !== "0";
+    currentMinMatch !== "all";
 
   // Apply client-side filters and sorting
   const filteredResults = useMemo(() => {
@@ -185,10 +185,24 @@ export function TeamPlayerDiscoveryClient({
       );
     }
 
-    // Minimum match filter
-    const minMatch = parseInt(currentMinMatch, 10) || 0;
-    if (minMatch > 0) {
-      results = results.filter((r) => r.matchResult.score >= minMatch);
+    // Minimum match filter (classification-based)
+    if (currentMinMatch && currentMinMatch !== "all") {
+      const allowed = new Set<string>();
+      if (currentMinMatch === "excellent") {
+        allowed.add("excellent");
+      } else if (currentMinMatch === "strong") {
+        allowed.add("excellent");
+        allowed.add("strong");
+      } else if (currentMinMatch === "possible") {
+        allowed.add("excellent");
+        allowed.add("strong");
+        allowed.add("possible");
+      }
+      if (allowed.size > 0) {
+        results = results.filter((r) =>
+          allowed.has(r.matchResult.classification),
+        );
+      }
     }
 
     // Sorting
@@ -418,7 +432,7 @@ export function TeamPlayerDiscoveryClient({
           <Select
             value={currentMinMatch}
             onValueChange={(v) =>
-              updateParams({ minMatch: v === "0" ? null : v })
+              updateParams({ minMatch: v === "all" ? null : v })
             }
           >
             <SelectTrigger className="w-[130px]">

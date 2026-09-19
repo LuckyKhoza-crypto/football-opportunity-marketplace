@@ -402,6 +402,106 @@ export const APPLICATION_STATUS_DESCRIPTIONS: Record<ApplicationStatus, string> 
 export const ACTIVE_APPLICATION_STATUSES: ApplicationStatus[] = ["pending", "reviewing"];
 export const PAST_APPLICATION_STATUSES: ApplicationStatus[] = ["accepted", "rejected", "withdrawn"];
 
+// ─── Team Membership ───────────────────────────────────────────
+
+export type TeamMembershipStatus = "active";
+
+export interface TeamMembership {
+  id: string;
+  team_profile_id: string;
+  player_profile_id: string;
+  position: string | null;
+  role: string | null;
+  status: TeamMembershipStatus;
+  joined_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const TEAM_MEMBERSHIP_STATUSES: TeamMembershipStatus[] = ["active"];
+
+/**
+ * A team membership joined with the team profile it references.
+ * Used for the player-side "Current Team" display.
+ *
+ * The team object contains only public-safe team fields — never
+ * internal ownership data or database metadata.
+ */
+export interface TeamMembershipWithTeam extends TeamMembership {
+  team: {
+    id: string;
+    team_name: string;
+    logo_url: string | null;
+    location: string | null;
+    league: string | null;
+  };
+}
+
+/**
+ * A team membership joined with the player profile (and the player's
+ * profiles row for name/avatar) it references.
+ * Used for the team-side "Roster" display.
+ *
+ * The player_profile object contains only public-safe profile fields —
+ * never email addresses or internal account data.
+ */
+export interface TeamMembershipWithPlayer extends TeamMembership {
+  player_profile: {
+    id: string;
+    profile_photo_url: string | null;
+    profile: {
+      full_name: string | null;
+      avatar_url: string | null;
+    } | null;
+  };
+}
+
+// ─── Team Invites ───────────────────────────────────────────────
+
+/**
+ * Derived invite state. There is intentionally NO status column in the
+ * database — state is derived from revoked_at / expires_at so it cannot
+ * drift out of sync with the underlying timestamps.
+ *
+ * A team invite is a reusable shared recruitment link: it is NOT consumed
+ * by a single acceptance. Historical acceptances are represented by
+ * team_memberships rows, never by mutating the invite itself.
+ */
+export type TeamInviteState = "pending" | "revoked" | "expired";
+
+export interface TeamInvite {
+  id: string;
+  team_profile_id: string;
+  /** SHA-256 hex digest of the raw invite token. The raw token is never persisted. */
+  token_hash: string;
+  /** profiles.id of the manager who created the invite. */
+  created_by: string;
+  expires_at: string;
+  revoked_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Public-safe invite metadata for the future join page (TEAM-003).
+ * Contains only what a player needs to decide whether to accept:
+ * team identity + invite state. Never exposes manager identity,
+ * internal ownership data, or raw database fields.
+ */
+export interface PublicTeamInvite {
+  id: string;
+  team: {
+    id: string;
+    team_name: string;
+    logo_url: string | null;
+    location: string | null;
+    league: string | null;
+  };
+  state: TeamInviteState;
+  expires_at: string;
+  created_at: string;
+}
+
 // ─── Messaging ──────────────────────────────────────────────────
 
 export interface Conversation {
@@ -441,7 +541,8 @@ export interface MessageWithSender extends Message {
 export type NotificationType =
   | "application_received"
   | "application_status_changed"
-  | "message_received";
+  | "message_received"
+  | "player_joined_team";
 
 export interface AppNotification {
   id: string;

@@ -1,0 +1,89 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Button } from "@/components/ui/button";
+
+/**
+ * TEAM-004 — Accept a shared team invite link.
+ *
+ * Calls POST /api/team/join with the raw invite token. The server
+ * performs the atomic membership creation (accept_team_invite RPC) and
+ * creates the team notification only on a successful membership creation.
+ *
+ * A team invite is a reusable shared recruitment link: the same URL may
+ * be accepted by multiple eligible players while it remains valid.
+ */
+export function AcceptInviteButton({
+  token,
+}: {
+  token: string;
+}) {
+  const router = useRouter();
+  const [status, setStatus] = useState<
+    "idle" | "loading" | "success" | "already_member" | "error"
+  >("idle");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  async function handleAccept() {
+    setStatus("loading");
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch("/api/team/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setStatus("error");
+        setErrorMessage(data.error ?? "Failed to accept the invitation.");
+        return;
+      }
+
+      if (data.created) {
+        setStatus("success");
+        // Redirect to the player dashboard after a short delay so the
+        // success state is visible.
+        setTimeout(() => router.push("/player"), 1200);
+      } else {
+        setStatus("already_member");
+      }
+    } catch {
+      setStatus("error");
+      setErrorMessage("Something went wrong. Please try again.");
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <Button
+        size="lg"
+        className="w-full sm:w-auto"
+        onClick={handleAccept}
+        disabled={status === "loading" || status === "success"}
+      >
+        {status === "loading" ? "Accepting…" : "Accept Invite"}
+      </Button>
+
+      {status === "success" && (
+        <p className="text-sm text-green-600">
+          {"You've joined the team! Redirecting to your dashboard…"}
+        </p>
+      )}
+
+      {status === "already_member" && (
+        <p className="text-sm text-muted-foreground">
+          {"You're already a member of this team."}
+        </p>
+      )}
+
+      {status === "error" && errorMessage && (
+        <p className="text-sm text-destructive">{errorMessage}</p>
+      )}
+    </div>
+  );
+}

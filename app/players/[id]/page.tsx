@@ -14,6 +14,8 @@ import {
 } from "@/types";
 import { ArrowLeft, MapPin, Calendar, Target, Trophy, Video, Award, Users, Globe } from "lucide-react";
 import { ContactPlayerButton } from "@/components/messaging/ContactPlayerButton";
+import { CurrentTeamCard } from "@/components/marketplace/current-team-card";
+import { getActiveMembershipsForPlayer } from "@/lib/team-membership-server";
 
 function formatPositions(positions: Position[]): string {
   return positions.join(" / ");
@@ -56,6 +58,9 @@ export default async function PublicPlayerProfilePage({
     .select("full_name, avatar_url")
     .eq("id", typedProfile.user_id)
     .single();
+
+  // Fetch the player's active team memberships (canonical source: team_memberships)
+  const memberships = await getActiveMembershipsForPlayer(typedProfile.id);
 
   return (
     <div className="container mx-auto px-4 py-12">
@@ -125,6 +130,11 @@ export default async function PublicPlayerProfilePage({
         </div>
 
         <div className="grid gap-6">
+          {/* Current Team */}
+          {memberships.length > 0 && (
+            <CurrentTeamCard membership={memberships[0]} />
+          )}
+
           {/* Bio */}
           {typedProfile.bio && (
             <Card>
