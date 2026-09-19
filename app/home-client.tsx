@@ -591,9 +591,6 @@ function PlayerRecommendationsSection({
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-primary">
-                        {rec.matchScore}% Match
-                      </span>
                       {rec.matchClassification && (
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                           CLASSIFICATION_COLORS[rec.matchClassification] ?? "bg-muted text-muted-foreground"
@@ -719,9 +716,6 @@ function TeamPlayerRecommendationsSection({
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-primary">
-                        {rec.matchScore}% Match
-                      </span>
                       {rec.matchClassification && (
                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
                           CLASSIFICATION_COLORS[rec.matchClassification] ?? "bg-muted text-muted-foreground"

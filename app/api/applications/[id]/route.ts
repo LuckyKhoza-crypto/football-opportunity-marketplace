@@ -214,19 +214,7 @@ export async function PATCH(
       );
     }
 
-    // Validate status transition
     const currentStatus = application.status;
-    const allowedTransitions = VALID_TRANSITIONS[currentStatus] ?? [];
-
-    if (!allowedTransitions.includes(newStatus)) {
-      return NextResponse.json(
-        {
-          error: `Cannot transition from '${currentStatus}' to '${newStatus}'`,
-          allowedTransitions,
-        },
-        { status: 400 },
-      );
-    }
 
     // Players can only withdraw their own applications
     if (isPlayer && newStatus !== "withdrawn") {
@@ -241,6 +229,116 @@ export async function PATCH(
       return NextResponse.json(
         { error: "Teams cannot withdraw applications" },
         { status: 403 },
+      );
+    }
+
+    // ─── Team acceptance: atomic application + membership ───────
+    // When a team accepts an application, the application status change
+    // and team membership creation must be atomic. This is handled by
+    // the accept_application RPC (TEAM-005), which:
+    //   1. Locks the application row (FOR UPDATE) to serialize concurrent requests
+    //   2. Resolves the opportunity as the authoritative source for team/position/role
+    //   3. Verifies the authenticated user owns the opportunity's team
+    //   4. Rejects ineligible applications (rejected/withdrawn → accepted)
+    //   5. Returns idempotent success for already-accepted applications
+    //   6. Rejects players already on a DIFFERENT team (PLAYER_ALREADY_ON_TEAM)
+    //   7. Creates or updates the team_memberships row atomically with the status change
+    if (isTeam && newStatus === "accepted") {
+      const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc(
+        "accept_application",
+        {
+          p_application_id: id,
+          p_user_id: userId,
+        },
+      );
+
+      if (rpcError || !rpcResult?.success) {
+        const errorCode = rpcResult?.error ?? rpcError?.message ?? "Failed to accept application";
+
+        switch (errorCode) {
+          case "APPLICATION_NOT_FOUND":
+            return NextResponse.json(
+              { error: "Application not found" },
+              { status: 404 },
+            );
+          case "UNAUTHORIZED":
+            return NextResponse.json(
+              { error: "Unauthorized" },
+              { status: 403 },
+            );
+          case "APPLICATION_NOT_ELIGIBLE":
+            return NextResponse.json(
+              { error: `Cannot transition from '${currentStatus}' to 'accepted'` },
+              { status: 400 },
+            );
+          case "PLAYER_ALREADY_ON_TEAM":
+            return NextResponse.json(
+              {
+                error: "Player is already a member of a different team",
+                code: "PLAYER_ALREADY_ON_TEAM",
+              },
+              { status: 409 },
+            );
+          default:
+            console.error("Application acceptance failed:", rpcError ?? rpcResult);
+            return NextResponse.json(
+              { error: "Failed to accept application" },
+              { status: 500 },
+            );
+        }
+      }
+
+      // Fetch the updated application for the response
+      const { data: updated, error: fetchUpdatedError } = await supabaseAdmin
+        .from("applications")
+        .select()
+        .eq("id", id)
+        .single();
+
+      if (fetchUpdatedError) {
+        console.error("Failed to fetch updated application:", fetchUpdatedError);
+        return NextResponse.json(
+          { error: "Failed to fetch updated application" },
+          { status: 500 },
+        );
+      }
+
+      // ─── Notification: Application accepted ────────────────────
+      // Only when the application actually transitioned (not already_accepted).
+      // Idempotent re-acceptance must NOT generate a duplicate notification.
+      if (!rpcResult.already_accepted) {
+        try {
+          const teamName = application.opportunity?.team?.team_name ?? "the team";
+          const positionLabel = application.opportunity?.position
+            ? (POSITION_LABELS[application.opportunity.position] ?? application.opportunity.position)
+            : "your position";
+
+          await createNotification({
+            userId: application.player_profile?.user_id,
+            type: "application_status_changed",
+            title: "Application updated",
+            body: `${teamName} has accepted your application for ${positionLabel}.`,
+            link: `/player/applications/${id}`,
+          });
+        } catch (notifErr) {
+          // Notification failure should not fail the status change
+          console.error("Failed to create status change notification:", notifErr);
+        }
+      }
+
+      return NextResponse.json({ success: true, application: updated });
+    }
+
+    // Validate status transition (non-acceptance paths)
+    const allowedTransitions = VALID_TRANSITIONS[currentStatus] ?? [];
+
+    if (!allowedTransitions.includes(newStatus)) {
+      return NextResponse.json(
+        {
+          error: `Cannot transition from '${currentStatus}' to '${newStatus}'`,
+          allowedTransitions,
+        },
+        { status: 400 },
       );
     }
 
@@ -272,9 +370,6 @@ export async function PATCH(
 
       let body: string;
       switch (newStatus) {
-        case "accepted":
-          body = `${teamName} has accepted your application for ${positionLabel}.`;
-          break;
         case "rejected":
           body = `${teamName} has declined your application for ${positionLabel}.`;
           break;

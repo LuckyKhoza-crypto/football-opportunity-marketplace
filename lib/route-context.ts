@@ -26,7 +26,7 @@ const TEAM_MGMT_PREFIXES = ["/team", "/team/onboarding", "/team/profile", "/team
  * Public resource route prefixes.
  * Visiting these should NOT change the active view.
  */
-const PUBLIC_PREFIXES = ["/players", "/teams", "/opportunities"];
+const PUBLIC_PREFIXES = ["/players", "/teams", "/opportunities", "/team/join"];
 
 /**
  * Determine the route context for a given pathname.

@@ -359,12 +359,9 @@ export default async function PlayerDashboardPage() {
                             <span
                               className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${colorClass}`}
                             >
-                              {rec.score}%
+                              {label}
                             </span>
                           </div>
-                          <span className="text-xs text-muted-foreground">
-                            {label}
-                          </span>
                         </Link>
                       );
                     })}

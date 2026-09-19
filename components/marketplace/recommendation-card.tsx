@@ -10,7 +10,6 @@ import {
 import type { MatchResult } from "@/lib/matching";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { MatchDetails } from "@/components/marketplace/match-details";
 import {
   MapPin,
@@ -50,14 +49,6 @@ const CLASSIFICATION_COLORS: Record<string, string> = {
   poor: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
 };
 
-const SCORE_COLORS: Record<string, string> = {
-  excellent: "text-green-600 dark:text-green-400",
-  strong: "text-emerald-600 dark:text-emerald-400",
-  possible: "text-blue-600 dark:text-blue-400",
-  weak: "text-yellow-600 dark:text-yellow-400",
-  poor: "text-red-600 dark:text-red-400",
-};
-
 interface RecommendationCardProps {
   opportunity: Opportunity & {
     team_name?: string | null;
@@ -70,7 +61,7 @@ export function RecommendationCard({
   opportunity,
   matchResult,
 }: RecommendationCardProps) {
-  const { score, classification } = matchResult;
+  const { classification } = matchResult;
 
   const positionLabel = opportunity.position
     ? POSITION_LABELS[opportunity.position] ?? opportunity.position
@@ -90,7 +81,6 @@ export function RecommendationCard({
 
   const classificationLabel =
     CLASSIFICATION_LABELS[classification] ?? classification;
-  const scoreColor = SCORE_COLORS[classification] ?? "text-muted-foreground";
   const classificationColor =
     CLASSIFICATION_COLORS[classification] ?? "bg-muted text-muted-foreground";
 
@@ -98,14 +88,9 @@ export function RecommendationCard({
     <Card className="transition-shadow hover:shadow-md">
       <CardContent className="p-6">
         <div className="flex flex-col gap-4">
-          {/* Match Score */}
+          {/* Match Classification */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <span
-                className={`text-2xl font-bold tabular-nums ${scoreColor}`}
-              >
-                {score}%
-              </span>
               <span
                 className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${classificationColor}`}
               >
@@ -116,9 +101,6 @@ export function RecommendationCard({
               Profile Compatibility
             </span>
           </div>
-
-          {/* Score Progress Bar */}
-          <Progress value={score} className="h-2" />
 
           {/* Team Info */}
           <div className="flex items-center gap-3">

@@ -464,6 +464,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             &copy; {new Date().getFullYear()} Football Opportunity Marketplace.
             All rights reserved.
           </p>
+          <p className="mt-1 text-center">
+            <Link
+              href="/acknowledgements"
+              className="text-[10px] text-muted-foreground/50 transition-colors hover:text-muted-foreground hover:underline"
+            >
+              Acknowledgements
+            </Link>
+          </p>
         </div>
       </footer>
     </div>

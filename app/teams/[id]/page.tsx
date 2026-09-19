@@ -10,6 +10,8 @@ import {
   type Opportunity,
 } from "@/types";
 import { ArrowLeft, MapPin, Globe, Users, Swords } from "lucide-react";
+import { RosterPlayerCard } from "@/components/marketplace/roster-player-card";
+import { getActiveMembershipsForTeam } from "@/lib/team-membership-server";
 
 export const metadata = {
   title: "Team Profile | Football Opportunity Marketplace",
@@ -45,6 +47,9 @@ export default async function PublicTeamProfilePage({ params }: PageProps) {
     .order("created_at", { ascending: false });
 
   const typedOpps = (opportunities ?? []) as unknown as Opportunity[];
+
+  // Fetch the team's active roster memberships (canonical source: team_memberships)
+  const rosterMemberships = await getActiveMembershipsForTeam(id);
 
   const levelLabel = typedTeam.playing_level
     ? TEAM_PLAYING_LEVEL_LABELS[typedTeam.playing_level] ?? typedTeam.playing_level
@@ -123,6 +128,32 @@ export default async function PublicTeamProfilePage({ params }: PageProps) {
             )}
           </CardContent>
         </Card>
+
+        {/* Roster */}
+        <div className="mb-10">
+          <h2 className="mb-4 text-xl font-semibold">
+            Roster ({rosterMemberships.length})
+          </h2>
+          {rosterMemberships.length > 0 ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {rosterMemberships.map((membership) => (
+                <RosterPlayerCard key={membership.id} membership={membership} />
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center py-12 text-center">
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+                  <Users className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <h3 className="mb-2 text-lg font-semibold">No players yet</h3>
+                <p className="text-sm text-muted-foreground">
+                  This team doesn't have any active players right now.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
         {/* Active Opportunities */}
         <div>

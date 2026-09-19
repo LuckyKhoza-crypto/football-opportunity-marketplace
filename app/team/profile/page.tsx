@@ -11,6 +11,8 @@ import {
 } from "@/types";
 import { MapPin, Globe, Users, Trophy, Link as LinkIcon, ExternalLink, Instagram, Twitter } from "lucide-react";
 import { getSelectedTeamIdWithFallback, resolveSelectedTeam } from "@/lib/team-context-server";
+import { RosterPlayerCard } from "@/components/marketplace/roster-player-card";
+import { getActiveMembershipsForTeam } from "@/lib/team-membership-server";
 
 export default async function TeamProfilePage({
   searchParams,
@@ -56,6 +58,9 @@ export default async function TeamProfilePage({
   const socialLinks: string[] = Array.isArray(typedProfile.social_links)
     ? typedProfile.social_links
     : [];
+
+  // Fetch the team's active roster memberships (canonical source: team_memberships)
+  const rosterMemberships = await getActiveMembershipsForTeam(typedProfile.id);
 
   function getSocialIcon(url: string) {
     const lower = url.toLowerCase();
@@ -120,6 +125,36 @@ export default async function TeamProfilePage({
         </div>
 
         <div className="grid gap-6">
+          {/* Roster */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Users className="h-5 w-5 text-primary" />
+                Roster ({rosterMemberships.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {rosterMemberships.length > 0 ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {rosterMemberships.map((membership) => (
+                    <RosterPlayerCard key={membership.id} membership={membership} />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center py-8 text-center">
+                  <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                    <Users className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    No players on the roster yet. Players who accept your
+                    invites or are accepted through applications will appear
+                    here.
+                  </p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* About */}
           {typedProfile.description && (
             <Card>

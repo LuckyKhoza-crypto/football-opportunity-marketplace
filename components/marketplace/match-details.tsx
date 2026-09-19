@@ -3,7 +3,6 @@
 import { useState } from "react";
 import type { MatchResult, FactorBreakdown } from "@/lib/matching";
 import type { PlayerProfile, Opportunity } from "@/types";
-import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import {
   ChevronDown,
@@ -32,14 +31,6 @@ const CLASSIFICATION_COLORS: Record<string, string> = {
     "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
   weak: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
   poor: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
-};
-
-const SCORE_COLORS: Record<string, string> = {
-  excellent: "text-green-600 dark:text-green-400",
-  strong: "text-emerald-600 dark:text-emerald-400",
-  possible: "text-blue-600 dark:text-blue-400",
-  weak: "text-yellow-600 dark:text-yellow-400",
-  poor: "text-red-600 dark:text-red-400",
 };
 
 // ─── Factor Display Helpers ──────────────────────────────────────
@@ -187,9 +178,8 @@ export function MatchDetails({
 }: MatchDetailsProps) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const { score, classification, reasons, mismatches, breakdown } = matchResult;
+  const { classification, reasons, mismatches, breakdown } = matchResult;
   const classificationLabel = CLASSIFICATION_LABELS[classification] ?? classification;
-  const scoreColor = SCORE_COLORS[classification] ?? "text-muted-foreground";
   const classificationColor =
     CLASSIFICATION_COLORS[classification] ?? "bg-muted text-muted-foreground";
 
@@ -216,12 +206,9 @@ export function MatchDetails({
     return setFields.length < 4;
   })();
 
-  // Score display
-  const scoreDisplay = (
+  // Classification display
+  const classificationDisplay = (
     <div className="flex items-center gap-3">
-      <span className={`text-2xl font-bold tabular-nums ${scoreColor}`}>
-        {score}% Match
-      </span>
       <span
         className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${classificationColor}`}
       >
@@ -383,8 +370,8 @@ export function MatchDetails({
             Limited requirements
           </p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            This opportunity has limited requirements. The match score may be
-            less precise.
+            This opportunity has limited requirements. The match may be less
+            precise.
           </p>
         </div>
       </div>
@@ -394,8 +381,8 @@ export function MatchDetails({
   // Why callout
   const whyCallout = showWhyCallout ? (
     <p className="text-xs font-medium text-muted-foreground">
-      Profile compatibility \u2014 this score represents how well the
-      profile matches the requirements, not a talent evaluation.
+      Profile compatibility \u2014 this represents how well the profile
+      matches the requirements, not a talent evaluation.
     </p>
   ) : null;
 
@@ -420,7 +407,7 @@ export function MatchDetails({
           onClick={() => setIsOpen(!isOpen)}
           className="flex w-full items-center justify-between gap-2 text-left"
         >
-          {scoreDisplay}
+          {classificationDisplay}
           {isOpen ? (
             <ChevronUp className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
           ) : (
@@ -440,8 +427,7 @@ export function MatchDetails({
   if (compact) {
     return (
       <div className="space-y-2">
-        {scoreDisplay}
-        <Progress value={score} className="h-2" />
+        {classificationDisplay}
         {showWhyCallout && (
           <p className="text-xs text-muted-foreground">
             Profile compatibility \u2014 not a talent evaluation.
@@ -460,8 +446,7 @@ export function MatchDetails({
   // Full mode
   return (
     <div className="space-y-3">
-      {scoreDisplay}
-      <Progress value={score} className="h-2" />
+      {classificationDisplay}
       {whyCallout}
       {breakdownDisplay}
       {reasonsDisplay}

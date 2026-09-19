@@ -195,10 +195,8 @@ function formatDateRelative(dateStr: string): string {
 }
 
 function MatchScoreBadge({
-  score,
   classification,
 }: {
-  score: number;
   classification: string;
 }) {
   const color =
@@ -210,7 +208,7 @@ function MatchScoreBadge({
       className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${color}`}
     >
       <Star className="h-3 w-3" />
-      {score}% {label}
+      {label}
     </span>
   );
 }
@@ -636,10 +634,9 @@ export function ApplicationsClient() {
                           )}
                         </div>
 
-                        {/* Match Score */}
+                        {/* Match Quality */}
                         {app.match_result && (
                           <MatchScoreBadge
-                            score={app.match_result.score}
                             classification={app.match_result.classification}
                           />
                         )}
@@ -824,10 +821,9 @@ export function ApplicationsClient() {
                           )}
                         </div>
 
-                        {/* Match Score */}
+                        {/* Match Quality */}
                         {app.match_result && (
                           <MatchScoreBadge
-                            score={app.match_result.score}
                             classification={app.match_result.classification}
                           />
                         )}

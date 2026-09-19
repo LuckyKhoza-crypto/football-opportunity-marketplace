@@ -270,13 +270,13 @@ function StatusBadge({ status }: { status: ApplicationStatus }) {
   );
 }
 
-function MatchScoreBadge({ score, classification }: { score: number; classification: string }) {
+function MatchScoreBadge({ classification }: { classification: string }) {
   const color = getMatchQualityColor(classification);
   const bg = getMatchQualityBg(classification);
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold ${color} ${bg}`}>
       <Star className="h-3 w-3" />
-      {score}% Match
+      {classification}
     </span>
   );
 }
@@ -382,7 +382,13 @@ export function TeamApplicationsClient({ teamId }: { teamId?: string | null }) {
 
       if (!res.ok) {
         const data = await res.json();
-        alert(data.error || "Failed to update application");
+        if (data.code === "PLAYER_ALREADY_ON_TEAM") {
+          alert(
+            "This player is already a member of a different team. They must leave their current team before joining yours.",
+          );
+        } else {
+          alert(data.error || "Failed to update application");
+        }
         return;
       }
 
@@ -792,7 +798,6 @@ export function TeamApplicationsClient({ teamId }: { teamId?: string | null }) {
                         <StatusBadge status={app.status} />
                         {app.match_result && (
                           <MatchScoreBadge
-                            score={app.match_result.score}
                             classification={app.match_result.classification}
                           />
                         )}

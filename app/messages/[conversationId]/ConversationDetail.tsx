@@ -448,7 +448,7 @@ export function ConversationDetail({ conversationId }: ConversationDetailProps) 
                   {data.match_result && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
                       <Star className="h-3 w-3" />
-                      {data.match_result.score}% Match
+                      {data.match_result.classification}
                     </span>
                   )}
 

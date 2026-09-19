@@ -4,7 +4,8 @@ import { emitToUser } from "@/lib/realtime-broadcast";
 export type NotificationType =
   | "application_received"
   | "application_status_changed"
-  | "message_received";
+  | "message_received"
+  | "player_joined_team";
 
 export interface CreateNotificationInput {
   userId: string;
