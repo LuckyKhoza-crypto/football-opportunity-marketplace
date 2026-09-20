@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useAppView } from "@/lib/use-app-view";
 import { OpportunityCard } from "@/components/marketplace/opportunity-card";
+import { PlayerPositions } from "@/components/marketplace/player-positions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -500,43 +501,51 @@ function LatestPlayersSection({
             href={`/players/${rec.id}`}
             className="group block"
           >
-            <Card className="h-full transition-shadow hover:shadow-md">
-              <CardContent className="p-6">
+            <Card className="relative h-full overflow-hidden border-[rgba(255,255,255,0.14)] transition-shadow hover:shadow-md">
+              {/* Background image */}
+              <div
+                className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+                style={{ backgroundImage: "url('/images/home-page-im3.jpg')" }}
+                aria-hidden="true"
+              />
+              <CardContent className="relative z-10 p-6">
                 <div className="flex flex-col gap-4">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-muted">
-                      <User className="h-5 w-5 text-muted-foreground" />
+                    <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/10">
+                      <User className="h-5 w-5 text-[#D1D5DB]" />
                     </div>
                     <div>
-                      <p className="text-sm font-semibold">
+                      <p className="text-sm font-semibold text-[#F5F5F5]">
                         {rec.full_name ?? "Player"}
                       </p>
                       {rec.playing_level && (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-[#D1D5DB]">
                           {getLevelLabel(rec.playing_level)}
                         </p>
                       )}
                     </div>
                   </div>
-                  <div>
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                      {rec.positions.length > 0 && (
-                        <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-                          {rec.positions.map((p) => POSITION_LABELS[p] ?? p).join(" / ")}
-                        </span>
-                      )}
+                  {rec.positions.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1">
+                      <PlayerPositions
+                        positions={rec.positions}
+                        badgeClassName="inline-flex items-center rounded-md bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground shadow-sm"
+                      />
                     </div>
-                  </div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                  )}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[#D1D5DB]">
                     {rec.location && (
                       <span className="flex items-center gap-1">
-                        <MapPin className="h-3.5 w-3.5" />
+                        <MapPin className="h-3.5 w-3.5 text-primary" />
                         {rec.location}
                       </span>
                     )}
                   </div>
                   <div className="pt-1">
-                    <Button variant="outline" size="sm" className="group">
+                    <Button
+                      size="sm"
+                      className="group border-0 bg-primary text-primary-foreground shadow-none hover:bg-primary/90 hover:text-primary-foreground"
+                    >
                       View Player
                       <ArrowRight className="ml-1 h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
                     </Button>
@@ -783,8 +792,14 @@ function TeamPlayerRecommendationsSection({
             href={`/players/${rec.id}`}
             className="group block"
           >
-            <Card className="transition-shadow hover:shadow-md">
-              <CardContent className="p-4">
+            <Card className="relative overflow-hidden border-[rgba(255,255,255,0.14)] transition-shadow hover:shadow-md">
+              {/* Background image */}
+              <div
+                className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+                style={{ backgroundImage: "url('/images/home-page-im3.jpg')" }}
+                aria-hidden="true"
+              />
+              <CardContent className="relative z-10 p-4">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
@@ -796,18 +811,20 @@ function TeamPlayerRecommendationsSection({
                         </span>
                       )}
                     </div>
-                    <h3 className="mt-1 font-semibold">
+                    <h3 className="mt-1 font-semibold text-white">
                       {rec.full_name ?? "Player"}
                     </h3>
-                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    <div className="mt-2 flex flex-wrap gap-2 text-xs text-[#D1D5DB]">
                       {rec.positions.length > 0 && (
-                        <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 font-medium text-primary">
-                          {rec.positions.map((p) => POSITION_LABELS[p] ?? p).join(" / ")}
-                        </span>
+                        <PlayerPositions
+                          positions={rec.positions}
+                          badgeClassName="inline-flex items-center rounded-md bg-primary px-2.5 py-1 text-xs font-bold text-primary-foreground shadow-sm"
+                          toggleClassName="text-[#D1D5DB]"
+                        />
                       )}
                       {rec.location && (
                         <span className="flex items-center gap-1">
-                          <MapPin className="h-3 w-3" />
+                          <MapPin className="h-3 w-3 text-primary" />
                           {rec.location}
                         </span>
                       )}
@@ -816,7 +833,7 @@ function TeamPlayerRecommendationsSection({
                       )}
                     </div>
                   </div>
-                  <ChevronRight className="h-5 w-5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                  <ChevronRight className="h-5 w-5 text-[#D1D5DB] transition-transform group-hover:translate-x-0.5" />
                 </div>
               </CardContent>
             </Card>
