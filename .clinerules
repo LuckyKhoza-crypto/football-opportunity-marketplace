@@ -1,0 +1,19 @@
+# Project Rules & Workflows
+
+## README Update Protocol
+- **Trigger:** Every time you modify, add, or delete code files that alter the project's features, architecture, setup steps, or API endpoints, you MUST update the `README.md` file for this project.
+- **Timing:** Perform the `README.md` update as the final step of the task, right before declaring the task complete.
+- **Token Efficiency & Tool Usage:** 
+  - Do NOT read the entire 900-line `README.md` file at the beginning of a task just to understand the codebase. Rely on your file-search and code-reading tools to understand the code first.
+  - When it is time to update the README, use specific tools (like `search_grep` or viewing specific line ranges) to locate only the sections that need changing (e.g., installation, usage, or environment variables).
+  - Modify only those specific sections surgically rather than reading or rewriting the entire file from scratch.
+- **Content Requirements:**
+  - Keep the installation, configuration, and usage sections completely accurate to the current state of the codebase.
+  - Document any new environment variables, dependencies, or scripts introduced during your work.
+  - Maintain a clean, professional markdown layout and preserve all existing formatting, headings, and sections that are unrelated to your current code changes.
+- **Verification:** Do not ask the user if you should update the README; proactively review and edit it as part of your core definition of a "completed task."
+
+## Post-Task Handoff Protocol
+- **Manual Steps Disclosure:** When announcing that a task is complete, you MUST explicitly state any manual steps the user needs to perform. 
+- **Examples:** This includes letting them know if they need to sign into an external service, run manual migrations, add secret tokens to a local `.env` file, clear a local cache, or restart a specific server or Docker container.
+- **Formatting:** Present these items clearly under a **"⚠️ Required Manual Action"** header in your final message. If no manual actions are needed, state that explicitly.

@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import {
-  POSITION_LABELS,
   PLAYING_LEVEL_LABELS,
   AVAILABILITY_LABELS,
   PREFERRED_FOOT_LABELS,
@@ -12,6 +11,7 @@ import type { MatchResult } from "@/lib/matching";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { MatchDetails } from "@/components/marketplace/match-details";
+import { PlayerPositions } from "@/components/marketplace/player-positions";
 import {
   MapPin,
   Calendar,
@@ -66,7 +66,6 @@ export function TeamPlayerCard({
   const { classification } = matchResult;
 
   const age = calculateAge(player.date_of_birth);
-  const secondaryPositions = player.positions?.slice(1) ?? [];
   const levelLabel = player.playing_level
     ? PLAYING_LEVEL_LABELS[player.playing_level] ?? player.playing_level
     : null;
@@ -83,8 +82,14 @@ export function TeamPlayerCard({
     CLASSIFICATION_COLORS[classification] ?? "bg-muted text-muted-foreground";
 
   return (
-    <Card className="transition-shadow hover:shadow-md">
-      <CardContent className="p-6">
+    <Card className="relative overflow-hidden border-[rgba(255,255,255,0.14)] transition-shadow hover:shadow-md">
+      {/* Background image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url('/images/home-page-im3.jpg')" }}
+        aria-hidden="true"
+      />
+      <CardContent className="relative z-10 p-6">
         <div className="flex flex-col gap-4">
           {/* Match Classification */}
           <div className="flex items-center justify-between">
@@ -95,14 +100,14 @@ export function TeamPlayerCard({
                 {classificationLabel}
               </span>
             </div>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-[#D1D5DB]">
               Match
             </span>
           </div>
 
           {/* Player Info */}
           <div className="flex items-center gap-3">
-            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-muted">
+            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/10">
               {player.profile_photo_url ? (
                 <img
                   src={player.profile_photo_url}
@@ -110,24 +115,24 @@ export function TeamPlayerCard({
                   className="h-12 w-12 rounded-full object-cover"
                 />
               ) : (
-                <Users className="h-6 w-6 text-muted-foreground" />
+                <Users className="h-6 w-6 text-[#D1D5DB]" />
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-base font-bold">
+              <p className="truncate text-base font-bold text-white">
                 {player.full_name ?? "Unknown Player"}
               </p>
             </div>
           </div>
 
           {/* Player Details */}
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-[#D1D5DB]">
             {age !== null && (
               <span>{age} years old</span>
             )}
             {player.location && (
               <span className="flex items-center gap-1">
-                <MapPin className="h-3.5 w-3.5" />
+                <MapPin className="h-3.5 w-3.5 text-primary" />
                 {player.location}
               </span>
             )}
@@ -135,36 +140,29 @@ export function TeamPlayerCard({
               <span>{levelLabel}</span>
             )}
             {footLabel && (
-              <span className="flex items-center gap-1">
-                <Footprints className="h-3.5 w-3.5" />
+              <span className="flex items-center gap-1 text-primary">
+                <Footprints className="h-3.5 w-3.5 text-primary" />
                 {footLabel}
               </span>
             )}
             {availabilityLabel && (
               <span className="flex items-center gap-1">
-                <Calendar className="h-3.5 w-3.5" />
+                <Calendar className="h-3.5 w-3.5 text-primary" />
                 {availabilityLabel}
               </span>
             )}
           </div>
 
-          {/* Secondary Positions */}
-          {secondaryPositions.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {secondaryPositions.map((pos) => (
-                <span
-                  key={pos}
-                  className="inline-flex items-center rounded-md bg-secondary/50 px-2 py-0.5 text-xs text-muted-foreground"
-                >
-                  {POSITION_LABELS[pos] ?? pos}
-                </span>
-              ))}
+          {/* Positions */}
+          {player.positions && player.positions.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <PlayerPositions positions={player.positions} />
             </div>
           )}
 
           {/* Match Details — Collapsible */}
           {(matchResult.reasons.length > 0 || matchResult.mismatches.length > 0) && (
-            <div className="border-t pt-3">
+            <div className="border-t border-white/10 pt-3">
               <MatchDetails
                 matchResult={matchResult}
                 collapsible
@@ -179,7 +177,10 @@ export function TeamPlayerCard({
           {/* CTA */}
           <div className="pt-1">
             <Link href={`/players/${player.id}`}>
-              <Button variant="outline" size="sm" className="group">
+              <Button
+                size="sm"
+                className="group border-0 bg-primary text-primary-foreground shadow-none hover:bg-primary/90 hover:text-primary-foreground"
+              >
                 View Player
                 <ArrowRight className="ml-1 h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
               </Button>
