@@ -14,6 +14,9 @@ import { getSelectedTeamIdFromLocalStorage } from "@/lib/team-context";
 const navItems = [
   { label: "Home", href: "/" },
   { label: "Opportunities", href: "/opportunities" },
+  // COMP-007: public competition results dashboard — visible to everyone,
+  // including logged-out visitors, and requires no authentication.
+  { label: "Competitions", href: "/competitions/results" },
 ];
 
 const playerNavItems = [

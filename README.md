@@ -61,7 +61,7 @@ A two-sided marketplace connecting football players with team opportunities. Pla
 ┌─────────────────────────────────────────────────────────────────────┐
 │                            Supabase                                 │
 │                                                                     │
-│  PostgreSQL (16 migrations)  ·  Storage (photos/logos)  ·  Realtime │
+│  PostgreSQL (18 migrations)  ·  Storage (photos/logos)  ·  Realtime │
 │  RLS enabled on all tables (defense-in-depth)                       │
 │  SECURITY DEFINER RPCs for atomic multi-table operations            │
 └─────────────────────────────────────────────────────────────────────┘
@@ -141,6 +141,19 @@ football-opportunity-marketplace/
 │   ├── team-membership.ts        # Pure membership helpers
 │   ├── team-membership-server.ts # Server membership loaders (player's team, team's roster)
 │   ├── team-join.ts              # Pure invite page state helpers
+│   ├── competition.ts            # Pure competition helpers (COMP-001, no I/O)
+│   ├── competition-server.ts     # Server competition helpers (COMP-001, auth + data)
+│   ├── competition-api.ts        # COMP-002 competition route handlers
+│   ├── competition-join.ts       # Pure join-link helpers (COMP-003, no I/O)
+│   ├── competition-join-server.ts# Server join-link + registration (COMP-003)
+│   ├── competition-join-api.ts   # COMP-003 join-link route handlers
+│   ├── competition-attempt.ts    # Pure attempt/verification helpers (COMP-004, no I/O)
+│   ├── competition-attempt-server.ts # Server verification + attempt recording (COMP-004/005)
+│   ├── competition-attempt-api.ts    # COMP-004/005 route handlers
+│   ├── competition-drawing.ts    # Pure drawing eligibility helpers (COMP-006, no I/O)
+│   ├── competition-drawing-server.ts # Server drawing start/read (COMP-006, atomic RPC)
+│   ├── competition-drawing-api.ts    # COMP-006 drawing route handlers
+│   ├── competition-public-server.ts  # Public competition results query (COMP-007, public data boundary)
 │   ├── team-profile.ts           # Team profile completeness calculator
 │   ├── player-profile.ts         # Player profile completeness calculator
 │   ├── multi-team.ts             # Multi-team admin capability check
@@ -156,7 +169,7 @@ football-opportunity-marketplace/
 │   ├── colors.ts                 # Centralized color tokens
 │   └── utils.ts                  # shadcn cn() helper
 │
-├── supabase/migrations/          # 16 SQL migrations (see Database Schema)
+├── supabase/migrations/          # 18 SQL migrations (see Database Schema)
 ├── types/index.ts                # All shared TypeScript types + option constants
 ├── public/images/                # Static images
 ├── app_roadmap.md                # MVP-004 → MVP-022 tickets
@@ -182,7 +195,7 @@ Google OAuth → NextAuth signIn callback → creates profiles row (if new)
 |---|---|
 | `lib/auth.ts` | NextAuth config. `signIn` creates a `profiles` row for new users via `supabaseAdmin`. `jwt` always re-fetches the latest `id` and `role` from `profiles` by email. `session` copies `token.id` → `session.user.id` and `token.roles` → `session.user.roles`. |
 | `lib/auth-helpers.ts` | Server-only guards: `getSession()`, `requireAuth()`, `requireRole(allowedRoles)`, `redirectToDashboard(roles)`, `hasPlayerRole()`, `hasTeamRole()`, `canAccessPlayerArea()`, `canAccessTeamArea()`, `getUserRoles()`. |
-| `middleware.ts` | NextAuth `withAuth` wrapper. Public routes: `/`, `/login`, `/signup`, `/api/auth`, `/_next`, `/favicon.ico`, `/players`, `/teams`, `/team/join`. Protected: `/dashboard`, `/player`, `/team`, `/onboarding`, `/messages`, `/notifications`, `/opportunities`. Role-based redirects: player routes require `player` role, team routes require `team` role; no roles → `/onboarding`. |
+| `middleware.ts` | NextAuth `withAuth` wrapper. Public routes: `/`, `/login`, `/signup`, `/api/auth`, `/_next`, `/favicon.ico`, `/players`, `/teams`, `/team/join`, `/competitions/join` (COMP-003) and `/competitions/results` (COMP-007). Protected: `/dashboard`, `/player`, `/team`, `/onboarding`, `/messages`, `/notifications`, `/opportunities`, `/competitions`. Role-based redirects: player routes require `player` role, team routes require `team` role; no roles → `/onboarding`. |
 | `app/onboarding/page.tsx` | Client page where users pick their role(s). Calls `POST /api/auth/update-role` then `session.update()`. |
 | `app/api/auth/update-role/route.ts` | Appends a role to `profiles.role` (never replaces). |
 | `app/api/auth/profile/route.ts` | Returns the current user's `profiles` row. |
@@ -215,6 +228,12 @@ All tables have RLS enabled. The application uses `supabaseAdmin` (service role)
 | `outreach` | Team-initiated contact | `opportunity_id`, `team_profile_id`, `player_profile_id`, `initial_message`, `status` (`pending`/`accepted`/`declined`/`withdrawn`), UNIQUE(`opportunity_id`, `team_profile_id`, `player_profile_id`) |
 | `team_memberships` | Canonical "player is on team" | `team_profile_id`, `player_profile_id`, `position`, `role`, `status` (only `active`), UNIQUE index on `player_profile_id` (one-team-per-player MVP rule) |
 | `team_invites` | Reusable shared recruitment links | `team_profile_id`, `token_hash` (SHA-256, UNIQUE), `created_by`, `expires_at`, `revoked_at`. **No status column** — state is derived from timestamps. |
+| `competition_events` | Competition events (COMP-001) | `name`, `description`, `location`, `event_date TIMESTAMPTZ`, `status` (`draft`/`active`/`drawing`/`completed`/`cancelled`), `challenge_name`, `challenge_threshold`, `max_attempts`, `created_by` (FK profiles, authoritative manager) |
+| `competition_participants` | A profile's participation in an event (COMP-001) | `event_id` (FK competition_events), `profile_id` (FK **profiles** — NOT player_profiles), `status` (`registered`/`challenge_pending`/`qualified`/`not_qualified`), `checked_in_at`, UNIQUE(`event_id`, `profile_id`) |
+| `competition_ambassadors` | Competition-specific ambassador authorization (COMP-001) | `event_id` (FK competition_events), `profile_id` (FK profiles), UNIQUE(`event_id`, `profile_id`). **Never derived from `profiles.role`.** |
+| `competition_join_links` | Reusable ambassador join links / QR codes (COMP-003) | `event_id` (FK competition_events), `ambassador_id` (FK **competition_ambassadors** — the link owner is the ambassador relation, not a profile), `token_hash` (SHA-256 of the raw token, UNIQUE), `revoked_at`. The raw token is never stored. |
+| `competition_attempts` | One physical challenge attempt per row (COMP-004) | `event_id` (FK competition_events), `participant_id` (FK competition_participants), `attempt_number` (server-assigned, 1-based), `result_value NUMERIC` (generic — no unit baked in), `passed` (server-computed), `recorded_by_profile_id` (FK profiles), UNIQUE(`participant_id`, `attempt_number`). A `BEFORE INSERT` trigger rejects cross-event participants and attempts beyond the event's `max_attempts`. |
+| `competition_drawings` | One immutable drawing + single winner per event (COMP-006) | `event_id` (FK competition_events, **UNIQUE** — one drawing per event), `winner_participant_id` (FK competition_participants — the winner), `winner_profile_id` (FK profiles), `qualified_participant_count` (server-calculated snapshot, `>= 1`), `drawn_by_profile_id` (FK profiles — who started it), `drawn_at`. The winner is represented through the participant/profile relationships only — no personal data is copied. |
 
 ### Storage Buckets
 
@@ -235,6 +254,7 @@ These perform atomic multi-table operations. The API layer calls them via `supab
 | `update_outreach_status` | Players can accept/decline; teams can withdraw. Validates current state. |
 | `accept_team_invite` | Atomically creates a `team_memberships` row for a player accepting a shared invite link. Locks the invite row (`FOR UPDATE`), rejects revoked/expired, rejects players already on a different team, idempotent for same team. |
 | `accept_application` | Atomically transitions an application to `accepted` AND creates/updates the player's `team_memberships` row. The **opportunity** is the authoritative source for team/position/role (never client-provided values). Idempotent for already-accepted. |
+| `start_competition_drawing` | **COMP-006.** Runs the competition drawing in one transaction: locks the event row (`FOR UPDATE`), authorizes creator **or** assigned ambassador, rejects an existing drawing (`DRAWING_ALREADY_EXISTS`) and non-drawable states (`EVENT_NOT_DRAWABLE`), counts the **qualified** participants (`NO_QUALIFIED_PARTICIPANTS` when zero), selects exactly one at random (`ORDER BY random() LIMIT 1`), inserts `competition_drawings` and moves the event to `completed`. Returns a machine-readable JSONB summary. The browser never selects the winner or the count. |
 
 ### RLS Notes
 
@@ -248,6 +268,11 @@ These perform atomic multi-table operations. The API layer calls them via `supab
 - `outreach`: team can view/create/update own; player can view/update own.
 - `team_memberships`: team can CRUD for own team profile; player can view own.
 - `team_invites`: team can CRUD for own team profile.
+- `competition_events` (COMP-001): creator read/update/delete; ambassadors can read. INSERT requires `created_by = auth.uid()`. Competition data is **never publicly writable**.
+- `competition_participants` (COMP-001): a participant can read/self-register their own row; only the event creator or an event ambassador can update participant status (participants cannot promote themselves to `qualified`) or remove participants.
+- `competition_ambassadors` (COMP-001): only the event creator can create/delete ambassador relationships (prevents arbitrary users authorizing themselves or others); creator and the ambassador can read.
+- `competition_attempts` (COMP-004): the event creator, an assigned ambassador, and the owning participant can read; there is **no client INSERT/UPDATE/DELETE** — every write goes through the service-role server helpers, which authorize the creator **or** an assigned ambassador.
+- `competition_drawings` (COMP-006): the event creator and an assigned ambassador can read; there is **no client INSERT/UPDATE/DELETE** — the only write path is the `start_competition_drawing` SECURITY DEFINER RPC. The drawing is immutable once created.
 
 ---
 
@@ -381,7 +406,51 @@ Exact match → 1.0 · 1 level apart → 0.8 · 2 apart → 0.5 · 3 apart → 0
 | `/messages/[conversationId]` | `app/messages/[conversationId]/page.tsx` | Conversation detail with realtime messages. |
 | `/notifications` | `app/notifications/page.tsx` | Notification list. |
 
+### Competitions (COMP-002 / COMP-007)
+
+Authenticated-only management routes. They deliberately do **NOT** require the
+`player`/`team` marketplace roles and do **NOT** require a `player_profiles` row —
+competitions are built on `profiles` + the auth session only.
+
+| Route | File | Purpose |
+|---|---|---|
+| `/competitions` | `app/competitions/page.tsx` | Management page: competitions created by the current profile + events they are an ambassador for. The **Create Competition** action is shown only to the competition-creation admin (COMP-007). |
+| `/competitions/new` | `app/competitions/new/page.tsx` | Create a competition event (starts in `draft`). **COMP-007:** server-guarded — only the profile whose id equals `MULTI_TEAM_ADMIN_USER_ID` may render it; anyone else gets a `404`. |
+| `/competitions/[id]` | `app/competitions/[id]/page.tsx` | Role-aware management page. Both creator and ambassador see event details, stats and the "Run Competition" (participant operations) entry point; only the creator additionally sees edit/lifecycle/ambassadors/join links. |
+| `/competitions/[id]/edit` | `app/competitions/[id]/edit/page.tsx` | Edit event configuration (creator only; server-verified). |
+
+### Public Competition Results (COMP-007)
+
+A **public, no-auth** dashboard showing competition results.
+
+| Route | File | Purpose |
+|---|---|---|
+| `/competitions/results` | `app/competitions/results/page.tsx` | Public results dashboard (listed in the main navigation for everyone, including logged-out visitors). Shows each competition's name, location, date, status, challenge, **qualified participants** (from the authoritative `competition_participants.status = 'qualified'` state) and the **persisted winner** from COMP-006. A qualified participant's name links to their existing public player profile (`/players/[id]`) only when they have one; participants without a `player_profiles` row are still shown (not linked). Never exposes management controls, participant ids, `profiles.id`, emails, verification codes/tokens or join tokens. |
+
+### Competition Join (COMP-003)
+
+Public player-facing entry flow. The join landing page is **public** so an
+unauthenticated player can see the competition and be routed through the existing
+auth flow (the join URL is preserved via a validated internal `callbackUrl`).
+
+| Route | File | Purpose |
+|---|---|---|
+| `/competitions/join/[token]` | `app/competitions/join/[token]/page.tsx` | Public competition landing page. Resolves the token server-side, shows event/challenge details, and offers Enter/Sign In. Never exposes participant data. |
+| `/competitions/join/[token]/pass` | `app/competitions/join/[token]/pass/page.tsx` | Private pre-entry pass for the registered participant (verification code, status, event details). Only rendered for the owning profile. |
+
 ---
+
+### Participant Verification & Challenge (COMP-004 / COMP-005)
+
+On-site, event-day operations flow, runnable by the **event creator or an assigned
+ambassador** (operational delegation — see COMP-005 below). Any other user — including a
+participant of the event — is redirected back to the event page. Verification and attempt
+recording are **separate** actions; verifying a participant never records an attempt.
+
+| Route | File | Description |
+|---|---|---|
+| `/competitions/[id]/participants` | `app/competitions/[id]/participants/page.tsx` | Event-day operations screen (creator **or** ambassador): event-day summary counts, participant list + derived challenge state, search, verification and attempt recording. Supports `?verified=<participantId>` to open a participant handed off by the QR flow. |
+| `/competitions/verify/[token]` | `app/competitions/verify/[token]/page.tsx` | QR landing page. Resolves the opaque token server-side, checks the requester manages the resolved event (creator **or** ambassador), then redirects to the participant manager with the resolved participant selected. The QR encodes only this opaque URL — never a profile/participant/event id. |
 
 ## API Routes
 
@@ -474,11 +543,288 @@ All API routes verify auth via `getServerSession(authOptions)` and use `supabase
 |---|---|---|
 | `/api/realtime/channels` | GET | Returns an HMAC-signed channel name. `?type=notification` → `user:<id>` channel. `?type=conversation&conversationId=<id>` → `conversation:<id>` channel (verifies participant). |
 
+### Competitions (COMP-002 / COMP-007)
+
+| Route | Methods | Purpose |
+|---|---|---|
+| `/api/competitions` | GET | List competitions managed by the current profile + events they are an ambassador for. |
+| `/api/competitions` | POST | Create an event. **`created_by` is resolved from the session** — a client-supplied value is ignored. Validates the challenge config; new events start in `draft`. **COMP-007:** creation is restricted to the configured `MULTI_TEAM_ADMIN_USER_ID` — a non-admin (ambassador or player) receives `403`, and the same fail-closed check is re-applied inside `createCompetitionEvent`. |
+| `/api/competitions/[id]` | GET | Event detail + basic statistics. Creator **or** authorized ambassador only. |
+| `/api/competitions/[id]` | PATCH | Update event configuration **or** perform a controlled lifecycle transition (`{ status }`). Creator only. Invalid transitions return `409`. |
+| `/api/competitions/[id]/ambassadors` | GET | List the event's ambassadors (creator only). |
+| `/api/competitions/[id]/ambassadors` | POST | Add an existing account as an ambassador by `email` (creator only). Friendly `404` when no account exists; duplicate returns `409`. |
+| `/api/competitions/[id]/ambassadors/[profileId]` | DELETE | Remove an ambassador (creator only). |
+| `/api/competitions/join` | POST | **Participant registration.** Body carries only the opaque `token`. The event, ambassador and profile are derived server-side (token + session). Validates: link exists, link not revoked, event `active`. Idempotent — returns the existing participant instead of a duplicate. Unauthenticated → `401`. |
+| `/api/competitions/[id]/join-links` | GET | List an event's join links (creator only). Never returns the raw token — only the digest was ever stored. |
+| `/api/competitions/[id]/join-links` | POST | Generate a reusable join link + QR for one of the event's ambassadors (creator only). Returns the raw token and absolute join URL **exactly once**. |
+| `/api/competitions/[id]/join-links/[linkId]` | DELETE | Revoke a join link (creator only). Preserves the row (`revoked_at`) so history survives. |
+| `/api/competitions/[id]/participants` | GET | List participants + derived challenge state (creator **or** assigned ambassador). Returns only operational data — never participant emails. |
+| `/api/competitions/[id]/verify` | POST | Resolve a participant by `code` (or opaque `token`). Creator **or** assigned ambassador; the credential is resolved server-side and scoped to the event. Marks first-seen presence. |
+| `/api/competitions/[id]/participants/[participantId]/attempts` | GET | A participant's attempt history (creator **or** assigned ambassador). |
+| `/api/competitions/[id]/participants/[participantId]/attempts` | POST | Record one attempt. Body carries **only** `result_value`; attempt number, `passed`, ownership and limits are server-resolved. Creator **or** assigned ambassador. Duplicates → `409`. |
+| `/api/competitions/[id]/pass-token` | POST | Mint the authenticated participant's own opaque verification token (stores only the SHA-256 digest; returns the raw token once for the pass QR). |
+| `/api/competitions/[id]/draw` | GET | COMP-006. Return the drawing result (winner name, eligible count, timestamp — never database ids) if one exists. Creator **or** assigned ambassador only; an unrelated user gets an opaque `404`. |
+| `/api/competitions/[id]/draw` | POST | COMP-006. **Start the drawing.** The request body is ignored — the winner is selected server-side by the `start_competition_drawing` RPC and the eligible count is calculated server-side. Creator **or** assigned ambassador. No qualified participants → `409`; a second drawing → `409`. |
+
 ### Debug
 
 | Route | Methods | Purpose |
 |---|---|---|
 | `/api/debug/players` | GET | Diagnostic endpoint for player_profiles queries (counts, discoverable filter, sample rows). |
+
+---
+
+## Competitions (COMP-001 / COMP-002 / COMP-003 / COMP-004 / COMP-005 / COMP-006 / COMP-007)
+
+Competitions are an additive feature layered on the existing auth system + `profiles`
+table. Being a competition **ambassador** is a competition-specific authorization
+relationship (`competition_ambassadors`) — it is **never** derived from `profiles.role`,
+and participation never requires marketplace onboarding.
+
+### Operational delegation (COMP-005)
+
+The creator creates and **owns** the competition; an assigned ambassador **runs** it on
+event day. There is no role/permission framework — one concept only:
+
+```
+competition event manager = event creator OR assigned ambassador
+```
+
+This is the shared server-side helper `canManageEvent(eventId, profileId)` in
+`lib/competition-server.ts` (creator from `competition_events.created_by`, ambassador
+from `competition_ambassadors`). It is reused by participant listing, verification,
+attempt recording and the QR-verification flow so there is a single operational-access
+source of truth. `competition_ambassadors` has **no status column** — an existing row is
+an active assignment, and removing the row removes the access immediately (authorization
+is always re-evaluated server-side; no cached client state).
+
+There is no migration for COMP-005 — the existing schema (0017/0018/0019) already
+supports the rule, and the existing RLS policies already let the creator **and** an
+assigned ambassador read/update participants and read attempts.
+
+- **Schema (`supabase/migrations/0017_competition_foundation.sql`):** `competition_events`,
+  `competition_participants`, `competition_ambassadors`. Lifecycle status CHECK:
+  `draft | active | drawing | completed | cancelled`.
+- **Pure helpers (`lib/competition.ts`):** status narrowing, challenge-config validation,
+  the lifecycle **transition map** (`COMPETITION_EVENT_TRANSITIONS` /
+  `isValidEventTransition`), and `computeCompetitionStatistics`.
+- **Server helpers (`lib/competition-server.ts`):** `getAuthenticatedProfileId`,
+  `isEventManager`, `isEventAmbassador`, `canManageEvent`, `getCompetitionViewerRole`,
+  listing helpers, `getCompetitionStatistics`, and the COMP-002 mutations
+  (`createCompetitionEvent`, `updateCompetitionEvent`, `changeCompetitionEventStatus`,
+  `addCompetitionAmbassador`, `removeCompetitionAmbassador`,
+  `getCompetitionAmbassadorsWithProfiles`).
+- **API handlers (`lib/competition-api.ts`):** the tested request handlers that the route
+  files under `app/api/competitions/**` delegate to.
+
+### Participant verification & challenge attempts (COMP-004)
+
+`supabase/migrations/0019_competition_attempts.sql` adds `competition_attempts`.
+
+- **Pure helpers (`lib/competition-attempt.ts`):** `parseAttemptResultValue` (rejects
+  missing/NaN/Infinity/malformed/out-of-range values), `meetsChallengeThreshold`
+  (**larger-is-better**: result `>=` threshold — the single place pass/fail is decided),
+  `getNextAttemptNumber`, `computeParticipantChallengeState` (attempts used/remaining,
+  best/last result, qualification) and `resolveParticipantStatus`.
+- **Server helpers (`lib/competition-attempt-server.ts`):** `getCompetitionParticipants`
+  (`listCompetitionParticipantsWithState`), `getParticipantChallengeState`,
+  `verifyCompetitionParticipantByCode` / `...ByToken`, `recordCompetitionAttempt`,
+  `getParticipantAttempts`, `mintParticipantVerificationToken`. The operational helpers
+  authorize the event **creator OR an assigned ambassador** via the shared
+  `canManageEvent` rule (`mintParticipantVerificationToken` remains self-only: a
+  participant mints their own pass token).
+- **API handlers (`lib/competition-attempt-api.ts`):** thin adapters used by
+  `app/api/competitions/[id]/participants/**`, `.../verify` and `.../pass-token`.
+
+### Public results & admin-only creation (COMP-007)
+
+Two additions:
+
+1. **A public, no-auth competition results dashboard** at `/competitions/results`
+   (linked in the main navigation for everyone). It reads through the dedicated
+   server helper `lib/competition-public-server.ts` → `getPublicCompetitionResults()`,
+   which is the single **public data boundary**: it uses the service-role client
+   (so no RLS loosening is required — `competition_participants`, `profiles` and
+   `player_profiles` are **not** made public), joins participants → profiles →
+   player_profiles → drawings in a handful of queries, and projects rows down to
+   public-safe fields only (display name, avatar, `player_profiles.id` for linking,
+   winner flag). Components never receive a raw row. It exposes no participant ids,
+   `profiles.id`, emails, verification codes/tokens or join tokens.
+
+   - **Qualified participants** come from the authoritative COMP-004 state
+     (`competition_participants.status = 'qualified'`). Registered, failed or
+     never-attempted participants are excluded.
+   - **Winner** comes from the persisted COMP-006 drawing (`competition_drawings`);
+     it is never randomly reselected and never computed on the client. Competitions
+     with no drawing show **"Drawing pending"** — never a fake winner.
+   - **Player profile links:** a qualified participant's name links to the existing
+     public `/players/[id]` route **only** when a `player_profiles` row exists;
+     otherwise the plain name is shown (no broken link). Participation does not
+     require a player profile (COMP-003).
+
+2. **A temporary admin-only competition-creation restriction.** Only the
+   authenticated profile whose id equals the server-only env var
+   `MULTI_TEAM_ADMIN_USER_ID` may create a competition.
+
+   ```
+   MULTI_TEAM_ADMIN_USER_ID
+           ↓
+   only matching authenticated user
+           ↓
+   can create competitions
+   ```
+
+   - Server helper `isCompetitionCreationAdmin(profileId)` in
+     `lib/competition-server.ts` — one responsibility, **fails closed** when the env
+     var is missing (never open to everyone). Never derived from `profiles.role` and
+     never exposed to the browser (no `NEXT_PUBLIC_`).
+   - Enforced in **three** places for one authoritative operation: the
+     `POST /api/competitions` route (`403` for non-admins), the actual
+     `createCompetitionEvent` helper (returns `null` for non-admins), and the
+     `/competitions/new` server page (`404` for non-admins). The management page
+     hides the **Create Competition** action for non-admins.
+   - **Ambassador operational permissions are unchanged** (COMP-005): ambassadors can
+     still manage assigned events, verify participants, record attempts, see
+     qualification and start the drawing. The restriction applies to creating a
+     **new** competition only.
+   - **No migration** — the existing schema already supports the public query and the
+     restriction.
+
+### Drawing & winner selection (COMP-006)
+
+`supabase/migrations/0020_competition_drawings.sql` adds `competition_drawings` and the
+`start_competition_drawing` RPC. Once participants have been run and qualified, a manager
+starts **one** drawing that selects **one** winner. The model is intentionally minimal —
+no weighted entries, tickets, multiple winners or rerolls.
+
+- **Eligibility** is the existing COMP-004 state: a participant is eligible when
+  `competition_participants.status = 'qualified'`. The server counts them; the browser
+  never supplies eligibility or a count.
+- **Random selection** happens **server-side** inside the RPC (`ORDER BY random() LIMIT 1`
+  over the qualified set) — never `Math.random()` in a component.
+- **Persistence:** the drawing row stores only the winner relationships
+  (`winner_participant_id`, `winner_profile_id`), the server-calculated
+  `qualified_participant_count` snapshot, the initiator (`drawn_by_profile_id`) and
+  `drawn_at`. Display names are resolved from the referenced profile at render time — no
+  personal data is copied.
+- **One drawing per event:** a `UNIQUE(event_id)` index plus the RPC's row lock
+  (`FOR UPDATE`) guarantee that two simultaneous "Start Drawing" requests produce exactly
+  one winner. The second request receives `409 DRAWING_ALREADY_EXISTS`.
+- **Lifecycle:** the drawing moves the event to the terminal `completed` state. A drawing
+  is only startable from `active` (or the prepared `drawing`) status.
+- **Immutable:** there is no update/delete path for a drawing and no "Draw Again" action.
+- **Pure helpers (`lib/competition-drawing.ts`):** `isEventDrawable`,
+  `getDrawingUnavailableReason`.
+- **Server helpers (`lib/competition-drawing-server.ts`):** `getQualifiedParticipantCount`
+  (display-safe count), `getCompetitionDrawing` (creator-or-ambassador read),
+  `startCompetitionDrawing` (re-checks authorization, then runs the atomic RPC).
+- **API handlers (`lib/competition-drawing-api.ts`):** thin adapters used by
+  `app/api/competitions/[id]/draw` (GET/POST).
+- **UI:** the `DrawingPanel` (`app/competitions/[id]/DrawingPanel.tsx`) renders in the
+  event page for the creator **and** assigned ambassadors. It shows a **Start Drawing**
+  action with a confirmation step (including the eligible count) and, after the draw, the
+  immutable winner result (name, eligible count, timestamp). Participants do not gain
+  access to drawing management data.
+
+Authorization for the operational endpoints is **creator OR assigned ambassador**
+(COMP-005). Registration in `competition_ambassadors` is the sole source of ambassador
+authority — it is never read from `profiles.role`, the browser, or a client-supplied
+`event_id` / `profile_id`. No client-supplied profile/participant/event id, attempt
+number, threshold or `passed` value is ever trusted, and the operator view never exposes
+participant emails or other private profile fields.
+
+Concurrency / idempotency: `UNIQUE(participant_id, attempt_number)` makes a duplicate
+attempt number fail (`23505` → HTTP `409`); a passing attempt closes the challenge
+(no further attempts); a `BEFORE INSERT` trigger independently rejects cross-event
+participants and any attempt beyond `max_attempts`.
+
+### Lifecycle (controlled)
+
+Transitions are validated server-side — the client can never set an arbitrary status:
+
+```
+draft    → active | cancelled
+active   → drawing | cancelled
+drawing  → active | completed
+completed (terminal)
+cancelled (terminal)
+```
+
+`drawing` prepares the event for the future raffle ticket; **winner selection is out of
+scope for COMP-002**. The transition map is the single, extensible place to change this if
+a later ticket (e.g. COMP-007) must own `drawing → completed`.
+
+### Authorization rules
+
+| Capability | Event creator | Ambassador | Other user |
+|---|---|---|---|
+| View event / stats | ✅ | ✅ | ❌ |
+| Edit event configuration | ✅ | ❌ | ❌ |
+| Change lifecycle status | ✅ | ❌ | ❌ |
+| Add / remove ambassadors | ✅ | ❌ | ❌ |
+
+All checks run server-side; disabled UI is never the authorization boundary.
+
+---
+
+## Competition Join Links (COMP-003)
+
+The player-facing entry flow: an ambassador shares a reusable join link / QR code,
+a player scans it, authenticates through the **existing** NextAuth flow, and
+registers for the competition.
+
+```
+Ambassador → get unique join link + QR → player scans → /competitions/join/[token]
+  → (Sign in / create account if necessary, returning to the same URL)
+  → Register → competition_participants row → pre-entry pass
+```
+
+- **Schema (`supabase/migrations/0018_competition_join_links.sql`):** adds
+  `competition_join_links`, plus `verification_code` / `verification_token_hash`
+  columns on `competition_participants`.
+- **Join-link ownership:** a link belongs to an **event** (`event_id`) **and** an
+  **ambassador relationship** (`ambassador_id` → `competition_ambassadors.id`),
+  never directly to a profile. This records *which ambassador* shared the link.
+- **Token security (`lib/competition-join.ts`):** the raw token is generated with
+  `crypto.randomBytes(32)` (256 bits, base64url) and returned **once** for the URL /
+  QR. Only its SHA-256 hex digest is stored (`token_hash`, UNIQUE). A DB leak never
+  exposes active join URLs.
+- **Reusable, not one-time:** the same link/QR may be scanned by many players. Each
+  authenticated profile registers independently (enforced by UNIQUE(`event_id`,
+  `profile_id`) on `competition_participants`).
+- **Derived state:** `revoked_at != null → revoked`, else `active` (no status column).
+- **Event eligibility (server-side):** only `status = active` accepts registration;
+  `draft` / `drawing` / `completed` / `cancelled` are rejected by the mutation, not
+  merely hidden in the UI.
+- **Server helpers (`lib/competition-join-server.ts`):** `getCompetitionJoinByToken`
+  (public resolution), `createCompetitionJoinLink` / `revokeCompetitionJoinLink`
+  (creator-only), `getCompetitionJoinLinks`, `registerForCompetition` (idempotent),
+  `getCompetitionPass`, `isRegisteredForEvent`.
+- **API handlers (`lib/competition-join-api.ts`):** the tested handlers the route
+  files under `app/api/competitions/**` delegate to.
+- **Registration is lightweight:** it uses the existing auth system + `profiles`
+  only. It **never** requires `player_profiles`, never redirects to player
+  onboarding, and never creates a player profile automatically.
+- **Initial participant status:** `registered` (from the COMP-001 status model).
+- **Pre-entry pass:** after registration the participant sees a private pass
+  (`/competitions/join/[token]/pass`) with a human-readable, random, UNIQUE
+  `verification_code` (ambiguity-free alphabet) for the later ambassador flow. No
+  email / profile id / player profile id is ever used as the public code.
+- **QR codes:** rendered client-side with the `qrcode` library, encoding **only** the
+  public join URL. No participant data, email, profile id, or private event info.
+- **Auth continuation:** the join page is public; if not signed in it links to
+  `/login?callbackUrl=<join path>`, and the existing safe-callback guard
+  (`lib/invite-callback.ts`) prevents external redirect injection. The Google OAuth
+  configuration is unchanged.
+
+### Authorization rules (COMP-003)
+
+| Capability | Event creator | Ambassador | Authenticated player | Anonymous |
+|---|---|---|---|---|
+| View public join page | ✅ | ✅ | ✅ | ✅ |
+| Generate / revoke a join link | ✅ | ❌ | ❌ | ❌ |
+| Register (active event, valid link) | ✅ | ✅ | ✅ | ❌ |
+| View own pass | ✅ | ✅ | ✅ (own) | ❌ |
 
 ---
 
@@ -619,7 +965,7 @@ Team reviews application → PATCH /api/applications/[id] { status: "accepted" }
 | `NEXTAUTH_SECRET` | `lib/auth.ts` | JWT signing |
 | `NEXTAUTH_URL` | NextAuth | Production URL |
 | `REALTIME_CHANNEL_SECRET` | `lib/realtime-broadcast.ts` | HMAC signing for realtime channels |
-| `MULTI_TEAM_ADMIN_USER_ID` | `lib/multi-team.ts` | profiles.id of the multi-team admin (server-only) |
+| `MULTI_TEAM_ADMIN_USER_ID` | `lib/multi-team.ts`, `lib/competition-server.ts` | profiles.id of the multi-team admin (server-only). COMP-007 reuses it as the **only** user allowed to create competitions — server-only, never `NEXT_PUBLIC_`, fails closed when unset. |
 
 ---
 
@@ -631,9 +977,22 @@ Team reviews application → PATCH /api/applications/[id] { status: "accepted" }
 
 | Location | What's Tested |
 |---|---|
-| `lib/*.test.ts` | Pure logic: team-invite, team-join, team-context, team-membership, multi-team, invite-callback |
+| `lib/*.test.ts` | Pure logic: team-invite, team-join, team-context, team-membership, multi-team, invite-callback, competition (COMP-001 + COMP-002 lifecycle/statistics) |
+| `lib/competition-server.test.ts` | Competition server helpers: profile resolution, event ownership/ambassador authorization, participant lookups (COMP-001) |
+| `lib/competition-management-server.test.ts` | COMP-002 server mutations: viewer role, list/create/update, lifecycle transitions (valid + invalid), ambassador add/remove/duplicate, statistics |
+| `lib/competition-join.test.ts` | COMP-003 pure join helpers: token generation/hashing, derived link state, event eligibility, join-page state, URL/callback builders, verification codes |
+| `lib/competition-join-server.test.ts` | COMP-003 server: token hashing on lookup, link create/revoke authorization, event eligibility enforcement, idempotent registration, pass retrieval |
+| `lib/competition-attempt.test.ts` | COMP-004 pure helpers: result parsing, threshold/qualification, next attempt number, participant status resolution |
+| `lib/competition-attempt-server.test.ts` | COMP-004/005 server: verification (code + QR), attempt recording/numbering/limits, creator-or-ambassador authorization (allowed + denied), participant privacy |
+| `lib/competition-attempt-api.test.ts` | COMP-004/005 API handlers: session-derived identity, creator-or-ambassador outcomes mapped to HTTP statuses, server-owned fields not trusted from the body |
+| `lib/competition-drawing.test.ts` | COMP-006 pure helpers: drawable status set, eligibility, unavailable reasons |
+| `lib/competition-drawing-server.test.ts` | COMP-006 server: qualified count, creator/ambassador authorization (allowed + denied), server-side RPC selection, error mapping (already-drawn/no-qualified/not-drawable), display-safe result, no client-supplied winner/count |
+| `lib/competition-drawing-api.test.ts` | COMP-006 API handlers: auth, server-selected result mapped to 201, ignored client body, duplicate/no-qualified → 409, opaque 404 for private drawing reads |
+| `lib/competition-drawing-migration.test.ts` | COMP-006 migration (0020): table/RPC/unique-index/RLS shape, server-side random selection, one-drawing-per-event, immutability, no edits to prior migrations |
+| `lib/competition-public-server.test.ts` | COMP-007 public results: no-auth access, qualified-only participants, persisted winner (and no winner before drawing), player-profile linking (and safe non-linking), public-safe field projection and privacy |
+| `lib/competition-creation-auth.test.ts` | COMP-007 creation restriction: `isCompetitionCreationAdmin` (admin/ambassador/player/missing env), `createCompetitionEvent` allows only the admin and fails closed |
 | `lib/matching/*.test.ts` | Matching engine: engine, applications, mvp014, player-experience, team-applications |
-| `app/api/**/__tests__/` | API routes: applications (acceptance, withdrawal), messages, notifications, outreach, team invites, team join |
+| `app/api/**/__tests__/` | API routes: applications (acceptance, withdrawal), messages, notifications, outreach, team invites, team join, competitions (create + event/ambassador handlers) |
 | `app/homepage.test.ts` | Homepage rendering |
 | `components/notifications/__tests__/` | NotificationBell |
 
@@ -681,6 +1040,13 @@ npm test          # Vitest
 - ✅ Team memberships (canonical roster, one-team-per-player MVP rule)
 - ✅ Multi-team support (admin-gated)
 - ✅ Homepage with personalized recommendations
+- ✅ Competitions foundation (COMP-001 — data model, types, authorization, server helpers)
+- ✅ Competitions management (COMP-002 — `/competitions` create/manage pages, event editing, controlled lifecycle, ambassador add/remove by email, basic statistics)
+- ✅ Competition join links & QR entry flow (COMP-003 — reusable per-ambassador join links, QR codes, public `/competitions/join/[token]` landing page, existing-auth continuation, lightweight registration, pre-entry pass; challenge attempts/raffle/winners in later tickets)
+- ✅ Participant verification & challenge attempts (COMP-004 — on-site participant verification by code/QR, server-assigned attempt numbering + pass/fail, event-day operations screen, event-wide statistics)
+- ✅ Ambassador event-day operations (COMP-005 — ambassadors run an event: view participants, verify, record attempts and see qualification, via the shared `canManageEvent` creator-or-ambassador rule; creator-only administration preserved)
+- ✅ Competition drawing & winner selection (COMP-006 — managers run one atomic, server-side drawing over qualified participants, selecting exactly one winner persisted immutably in `competition_drawings`; one drawing per event enforced at the database level; the winner is shown to the creator and assigned ambassador. No rerolls or prizes.)
+- ✅ Public competition results dashboard + admin-only creation (COMP-007 — no-auth `/competitions/results` dashboard showing competitions, qualified participants and the persisted winner, with links to existing public player profiles; competition **creation** temporarily restricted to the `MULTI_TEAM_ADMIN_USER_ID` user, enforced server-side, while ambassador operational permissions are unchanged)
 
 ---
 

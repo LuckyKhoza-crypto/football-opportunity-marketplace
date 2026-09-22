@@ -69,6 +69,14 @@ export default withAuth(
           "/players",
           "/teams",
           "/team/join",
+          // COMP-003: the competition join landing page is public so that
+          // unauthenticated players can see the competition and be routed
+          // through the existing auth flow with the join URL preserved.
+          "/competitions/join",
+          // COMP-007: the public competition results dashboard is readable by
+          // logged-out visitors. It is intentionally listed here (before the
+          // protected "/competitions" prefix below) so it stays public.
+          "/competitions/results",
         ];
 
         const isPublicRoute = publicRoutes.some((route) =>
@@ -89,6 +97,7 @@ export default withAuth(
           "/messages",
           "/notifications",
           "/opportunities",
+          "/competitions",
         ];
 
         const isProtectedRoute = protectedRoutes.some((route) =>
@@ -121,5 +130,6 @@ export const config = {
     "/opportunities/:path*",
     "/messages/:path*",
     "/notifications/:path*",
+    "/competitions/:path*",
   ],
 };

@@ -17,3 +17,22 @@
 - **Manual Steps Disclosure:** When announcing that a task is complete, you MUST explicitly state any manual steps the user needs to perform. 
 - **Examples:** This includes letting them know if they need to sign into an external service, run manual migrations, add secret tokens to a local `.env` file, clear a local cache, or restart a specific server or Docker container.
 - **Formatting:** Present these items clearly under a **"⚠️ Required Manual Action"** header in your final message. If no manual actions are needed, state that explicitly.
+
+
+## Terminal and File Editing Safety
+
+- Do NOT use large shell heredocs (`cat <<EOF`, `cat > file <<EOF`, etc.) to create or replace substantial source files.
+- Prefer Cline's normal file editing mechanism for creating and modifying source files.
+- Keep terminal commands short, deterministic, and non-interactive.
+- Never run commands that wait for interactive stdin.
+- Avoid commands that require manual confirmation unless explicitly requested.
+- Avoid long-running/watch processes unless specifically needed.
+- Do not send large source files through the terminal as a single command.
+- Prefer:
+  1. Inspect the existing file.
+  2. Make the smallest necessary edit.
+  3. Inspect the result.
+  4. Run the relevant test/typecheck.
+  5. Fix any issues.
+- If a terminal command appears to hang, interrupt it rather than continuing to send input to the same terminal session.
+- Do not replace an entire file when a targeted edit is sufficient.
