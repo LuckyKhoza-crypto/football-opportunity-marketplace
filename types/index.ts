@@ -602,3 +602,199 @@ export interface ConversationWithDetails {
     };
   };
 }
+
+// ─── Competitions (COMP-001) ───────────────────────────────────
+//
+// Competitions are built on the EXISTING auth system and `profiles` table.
+// Participation does NOT require marketplace onboarding and does NOT create
+// a player_profiles row. Ambassador authorization is competition-specific
+// and is never derived from profiles.role.
+
+/** Lifecycle of a competition event. Mirrors the DB CHECK constraint. */
+export type CompetitionEventStatus =
+  | "draft"
+  | "active"
+  | "drawing"
+  | "completed"
+  | "cancelled";
+
+export interface CompetitionEvent {
+  id: string;
+  name: string;
+  description: string | null;
+  location: string | null;
+  event_date: string | null;
+  status: CompetitionEventStatus;
+  /** Challenge configuration lives on the event — never hard-coded. */
+  challenge_name: string;
+  challenge_threshold: number;
+  max_attempts: number;
+  /** profiles.id of the authoritative manager/creator. */
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const COMPETITION_EVENT_STATUSES: CompetitionEventStatus[] = [
+  "draft",
+  "active",
+  "drawing",
+  "completed",
+  "cancelled",
+];
+
+export const COMPETITION_EVENT_STATUS_LABELS: Record<
+  CompetitionEventStatus,
+  string
+> = {
+  draft: "Draft",
+  active: "Active",
+  drawing: "Drawing",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
+export const COMPETITION_EVENT_STATUS_COLORS: Record<
+  CompetitionEventStatus,
+  string
+> = {
+  draft: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
+  active: "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400",
+  drawing: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+  completed: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  cancelled: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
+};
+
+/**
+ * Per-event participation status. Mirrors the DB CHECK constraint.
+ *
+ * `qualified` / `not_qualified` are EVENT-SPECIFIC and are never stored on
+ * player_profiles — a player who fails one competition can still take part
+ * in another.
+ */
+export type CompetitionParticipantStatus =
+  | "registered"
+  | "challenge_pending"
+  | "qualified"
+  | "not_qualified";
+
+export interface CompetitionParticipant {
+  id: string;
+  event_id: string;
+  /** profiles.id — deliberately NOT player_profiles.id. */
+  profile_id: string;
+  status: CompetitionParticipantStatus;
+  checked_in_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const COMPETITION_PARTICIPANT_STATUSES: CompetitionParticipantStatus[] =
+  ["registered", "challenge_pending", "qualified", "not_qualified"];
+
+export const COMPETITION_PARTICIPANT_STATUS_LABELS: Record<
+  CompetitionParticipantStatus,
+  string
+> = {
+  registered: "Registered",
+  challenge_pending: "Challenge Pending",
+  qualified: "Qualified",
+  not_qualified: "Not Qualified",
+};
+
+export const COMPETITION_PARTICIPANT_STATUS_COLORS: Record<
+  CompetitionParticipantStatus,
+  string
+> = {
+  registered: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400",
+  challenge_pending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400",
+  qualified: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  not_qualified: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
+};
+
+/**
+ * Competition-specific authorization relationship. Being an ambassador is
+ * NOT a marketplace role and must never be inferred from profiles.role.
+ */
+export interface CompetitionAmbassador {
+  id: string;
+  event_id: string;
+  /** profiles.id of the authorized ambassador. */
+  profile_id: string;
+  created_at: string;
+}
+
+/**
+ * A competition ambassador joined with the referenced profile so management
+ * views can display a human-readable identity (email / name) without exposing
+ * the wider user database.
+ */
+export interface CompetitionAmbassadorWithProfile extends CompetitionAmbassador {
+  profile: {
+    id: string;
+    email: string;
+    full_name: string | null;
+    avatar_url: string | null;
+  } | null;
+}
+
+// ─── Competition join links (COMP-003) ─────────────────────────
+//
+// A competition join link is a REUSABLE shared entry link (rendered as a QR
+// code) owned by a competition ambassador relationship. It is never consumed by
+// a single registration — many participants may scan the same link.
+//
+// Token security mirrors team invitations: only the SHA-256 digest of the raw
+// token is persisted (token_hash); the raw token never touches the database.
+
+/** Derived join-link state. Mirrors getJoinLinkState — never a DB column. */
+export type CompetitionJoinLinkState = "active" | "revoked";
+
+export interface CompetitionJoinLink {
+  id: string;
+  event_id: string;
+  /** competition_ambassadors.id — the ambassador relationship that owns it. */
+  ambassador_id: string;
+  /** SHA-256 hex digest of the raw token. The raw token is never stored. */
+  token_hash: string;
+  revoked_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A join link resolved for the public join page. Contains ONLY public-safe
+ * event/ambassador metadata — never tokens, hashes, or participant data.
+ */
+export interface PublicCompetitionJoin {
+  state: CompetitionJoinLinkState;
+  /** Whether the event is currently accepting registration (status === active). */
+  eventOpen: boolean;
+  event: {
+    id: string;
+    name: string;
+    description: string | null;
+    location: string | null;
+    event_date: string | null;
+    challenge_name: string;
+    challenge_threshold: number;
+    max_attempts: number;
+  };
+  ambassador: {
+    full_name: string | null;
+  } | null;
+}
+
+/**
+ * A participant's private pre-entry pass. The verification fields are safe to
+ * show ONLY to the owning participant.
+ */
+export interface CompetitionPass {
+  participantId: string;
+  eventId: string;
+  status: CompetitionParticipantStatus;
+  /** Short human-readable code an ambassador can use to locate the participant. */
+  verificationCode: string | null;
+  checkedInAt: string | null;
+  createdAt: string;
+}
