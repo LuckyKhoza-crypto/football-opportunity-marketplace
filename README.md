@@ -19,13 +19,14 @@ A two-sided marketplace connecting football players with team opportunities. Pla
 7. [API Routes](#api-routes)
 8. [Realtime System](#realtime-system)
 9. [Notifications](#notifications)
-10. [Team Context & Multi-Team](#team-context--multi-team)
-11. [Key Data Flows](#key-data-flows)
-12. [Environment Variables](#environment-variables)
-13. [Testing](#testing)
-14. [Development Commands](#development-commands)
-15. [Roadmap & Current State](#roadmap--current-state)
-16. [Change Guide — How to Make Future Changes](#change-guide--how-to-make-future-changes)
+10. [Email Infrastructure](#email-infrastructure)
+11. [Team Context & Multi-Team](#team-context--multi-team)
+12. [Key Data Flows](#key-data-flows)
+13. [Environment Variables](#environment-variables)
+14. [Testing](#testing)
+15. [Development Commands](#development-commands)
+16. [Roadmap & Current State](#roadmap--current-state)
+17. [Change Guide — How to Make Future Changes](#change-guide--how-to-make-future-changes)
 
 ---
 
@@ -166,6 +167,17 @@ football-opportunity-marketplace/
 │   ├── use-notifications-realtime.ts  # Realtime notification subscription hook
 │   ├── use-conversation-realtime.ts   # Realtime conversation message hook
 │   ├── invite-callback.ts        # Safe callbackUrl validation (open-redirect protection)
+│   ├── email/                    # Transactional email infrastructure (EMAIL-001 / EMAIL-002)
+│   │   ├── email-service.ts      # Server-only sendTransactionalEmail() entry point
+│   │   ├── notification-delivery.ts  # Durable email notification outbox (enqueue + processor)
+│   │   ├── config.ts             # BREVO_* env resolution (fails safely)
+│   │   ├── errors.ts             # Safe, typed email errors
+│   │   ├── types.ts              # Generic TransactionalEmail types
+│   │   ├── providers/brevo.ts    # Brevo v3 REST transport (server-only, no SMTP)
+│   │   ├── templates/fom-email-shell.ts  # Email-safe HTML shell + text fallback
+│   │   ├── templates/outreach-message.ts # EMAIL-003 "team contacted you" email
+│   │   ├── templates/application-status.ts # EMAIL-004 application status email
+│   │   └── index.ts              # Barrel export
 │   ├── colors.ts                 # Centralized color tokens
 │   └── utils.ts                  # shadcn cn() helper
 │
@@ -224,7 +236,7 @@ All tables have RLS enabled. The application uses `supabaseAdmin` (service role)
 | `conversations` | Messaging thread per application/outreach | `application_id` (nullable, partial unique), `outreach_id` (nullable, partial unique), CHECK (at least one is set) |
 | `conversation_participants` | Exactly two per conversation | `conversation_id`, `user_id`, `last_read_at`, UNIQUE(`conversation_id`, `user_id`) |
 | `messages` | Chat messages | `conversation_id`, `sender_id`, `body` (1–5000 chars), permanent (no UPDATE/DELETE policies) |
-| `notifications` | In-app notifications | `user_id`, `type` (`application_received`/`application_status_changed`/`message_received`/`player_joined_team`), `title`, `body`, `link`, `source_id` (dedup), `read_at` |
+| `notifications` | In-app notifications | `user_id`, `type` (`application_received`/`application_status_changed`/`message_received`/`player_joined_team`), `title`, `body`, `link`, `source_id` (dedup), `read_at`, `data JSONB` (EMAIL-003/004 — non-sensitive typed presentation metadata, e.g. outreach context or application-status context) |
 | `outreach` | Team-initiated contact | `opportunity_id`, `team_profile_id`, `player_profile_id`, `initial_message`, `status` (`pending`/`accepted`/`declined`/`withdrawn`), UNIQUE(`opportunity_id`, `team_profile_id`, `player_profile_id`) |
 | `team_memberships` | Canonical "player is on team" | `team_profile_id`, `player_profile_id`, `position`, `role`, `status` (only `active`), UNIQUE index on `player_profile_id` (one-team-per-player MVP rule) |
 | `team_invites` | Reusable shared recruitment links | `team_profile_id`, `token_hash` (SHA-256, UNIQUE), `created_by`, `expires_at`, `revoked_at`. **No status column** — state is derived from timestamps. |
@@ -571,6 +583,8 @@ All API routes verify auth via `getServerSession(authOptions)` and use `supabase
 | Route | Methods | Purpose |
 |---|---|---|
 | `/api/debug/players` | GET | Diagnostic endpoint for player_profiles queries (counts, discoverable filter, sample rows). |
+| `/api/debug/email-test` | GET/POST | **Development-only** transactional-email smoke test (EMAIL-001). Fails **closed** (`404`) in production. Sends a **fixed** subject/body (`FOM Sports email test` / `Your FOM Sports Brevo integration is working.`); the caller may only supply a recipient (`?to=` or JSON `{ to, name? }`). Returns the Brevo `messageId`. Never a production email relay. |
+| `/api/email/deliveries/process` | GET/POST | **Server-only** email outbox processor (EMAIL-002). Requires `Authorization: Bearer $EMAIL_DELIVERY_SECRET` (or `x-email-delivery-secret`). Fails **closed** (`404`) when the secret is unset or wrong. Drains `email_notification_deliveries` (atomic claim) and sends via Brevo. Returns aggregate counts only — never recipient addresses or provider state. |
 
 ---
 
@@ -863,7 +877,7 @@ Client
 
 ### Creation (server-side only)
 
-`lib/notifications.ts` → `createNotification({ userId, type, title, body, link, sourceId })`
+`lib/notifications.ts` → `createNotification({ userId, type, title, body, link, sourceId, data? })`
 
 - Uses `supabaseAdmin` (service role) — clients can never create notifications (no INSERT RLS policy).
 - **Deduplication** via partial unique indexes:
@@ -882,6 +896,220 @@ Client
 | New message | `message_received` | Other participant | `POST /api/messages/[conversationId]` |
 | Team outreach | `message_received` | Player | `POST /api/outreach` |
 | Player joins via invite | `player_joined_team` | Team owner | `POST /api/team/join` |
+
+---
+
+## Email Infrastructure
+
+Transactional email is delivered through **Brevo** behind a small, server-only
+abstraction (EMAIL-001). EMAIL-002 adds a **durable email notification outbox**
+decoupled from in-app notifications: email-enabled notifications enqueue a
+delivery row, and a separate processor drains it and calls Brevo. No email is
+ever sent synchronously from the notification path.
+
+### Architecture
+
+```
+feature code
+  └─ sendTransactionalEmail({ to, subject, html, text })   lib/email/email-service.ts
+        └─ sendWithBrevo(...)                              lib/email/providers/brevo.ts
+              └─ POST https://api.brevo.com/v3/smtp/email  (api-key header)
+
+marketplace event ─► createNotification() ─► notifications row (canonical source)
+                                              ├─ Supabase broadcast → in-app UI (unchanged)
+                                              └─ email_notification_deliveries row (if email-enabled)
+                                                        └─ processor (/api/email/deliveries/process)
+                                                              └─ sendTransactionalEmail()
+```
+
+| File | Responsibility |
+|---|---|
+| `lib/email/types.ts` | Generic `TransactionalEmail` / `EmailRecipient` / result types — no Brevo concepts |
+| `lib/email/errors.ts` | `EmailConfigError`, `EmailRecipientError`, `EmailProviderError`, `EmailProviderRequestError` — safe, typed, never carry secrets |
+| `lib/email/config.ts` | `getEmailConfig()` reads `BREVO_API_KEY` / `BREVO_FROM_EMAIL` / `BREVO_FROM_NAME`; `isEmailConfigured()` for gating |
+| `lib/email/providers/brevo.ts` | Brevo v3 REST transport via `fetch` (**not** SMTP). `server-only`. The sender always comes from the environment. |
+| `lib/email/templates/fom-email-shell.ts` | `buildFomEmailShell({ title, bodyHtml, cta? })` → email-safe table HTML + plain-text fallback |
+| `lib/email/templates/outreach-message.ts` | EMAIL-003 "team contacted you" email: `buildOutreachMessageEmail()` / `buildOutreachEmailSubject()` — team, opportunity, optional player name and a `View Conversation` CTA. Never exposes internal ids as visible copy. |
+| `lib/email/templates/application-status.ts` | EMAIL-004 application-status email: `buildApplicationStatusEmail()` / `buildApplicationStatusEmailSubject()` — status-specific subject/copy (accepted/reviewing/withdrawn, and `rejected` phrased as "declined"), team/opportunity context and a `View Application` CTA. Never exposes internal ids as visible copy. |
+| `lib/email/email-service.ts` | `sendTransactionalEmail()` — validates the recipient, calls the provider, logs safely, returns `{ success: true, messageId }` |
+| `lib/email/notification-delivery.ts` | EMAIL-002 outbox: `enqueueEmailDeliveryForNotification()`, `processEmailDeliveries()`, `isEmailNotificationType()`, retry/backoff and safe error sanitisation. EMAIL-003/004: `buildNotificationEmail()` dispatches `kind: "outreach"` and `kind: "application_status_changed"` notifications to their specialized templates. EMAIL-002A: `scheduleEmailDeliveryProcessing()` kicks the existing processor for an immediate, best-effort first attempt via Next.js `after()`. `server-only`. |
+| `lib/notification-data.ts` | EMAIL-003/004 typed notification `data` payload: `OutreachNotificationData` + `ApplicationStatusNotificationData`, `parseNotificationData()`, `isOutreachNotificationData()`, `isApplicationStatusNotificationData()`. Dependency-free (client + server). |
+| `lib/email/index.ts` | Barrel export (`@/lib/email`) |
+| `supabase/migrations/0021_email_notification_deliveries.sql` | EMAIL-002 delivery table, RLS (no client policies), indexes and the atomic claim / stale-recovery RPCs |
+| `supabase/migrations/0022_notification_data.sql` | EMAIL-003 adds a nullable `notifications.data` JSONB column (JSON-object CHECK) for non-sensitive typed presentation metadata — RLS/indexes/realtime untouched |
+
+### Scope (EMAIL-001 / EMAIL-002)
+
+- One recipient, no CC/BCC, no attachments, no scheduling, no campaigns.
+- EMAIL-002 adds a **durable PostgreSQL outbox** (`email_notification_deliveries`)
+  with bounded exponential-backoff retries, concurrency-safe claiming and stale
+  `sending` recovery. No Redis/BullMQ/Kafka — PostgreSQL is the queue.
+- Email is enabled only for a small, centralized allowlist of notification types
+  (`message_received`, `application_status_changed`) via
+  `isEmailNotificationType()`. The list is intentionally easy to change.
+- The integration point is only the existing `createNotification()` primitive.
+  Applications, outreach, messaging, team membership, competitions and the
+  notification UI/Realtime behaviour are otherwise untouched.
+- **Immediate best-effort delivery (EMAIL-002A).** After `createNotification()`
+  durably enqueues a *new* email delivery, it calls
+  `scheduleEmailDeliveryProcessing()`, which runs the **existing** processor after
+  the HTTP response via Next.js `after()` — so the marketplace request never waits
+  on Brevo. Deduplicated/skipped enqueues do not trigger processing. This is the
+  same processor/outbox/retry mechanism, **not** a second scheduler.
+- **No scheduler ships in this ticket.** Immediate delivery is best-effort and runs
+  through Next.js `after()`. Failed deliveries remain durably queued with their
+  existing retry/backoff state. **Without a recurring scheduler, a future retry
+  requires another invocation of the existing processing path** (the secret-protected
+  endpoint below or another notification that drains the queue). Retries are therefore
+  **not** guaranteed; this is an accepted limitation because no cron/scheduled
+  processing is used. EMAIL-003 adds the outreach template; EMAIL-004 adds the
+  application-status template.
+
+### Team contacts player email (EMAIL-003)
+
+When a team reaches out through the marketplace, the player's `message_received`
+notification now carries an explicit, typed `data` payload (`{ kind: "outreach", teamName,
+opportunityTitle?, opportunityRole?, playerName? }`). The outbox processor detects
+`kind: "outreach"` and builds a dedicated **"team contacted you"** email
+(`lib/email/templates/outreach-message.ts`) instead of generic notification copy.
+
+- **How outreach is identified:** the `notifications.data.kind === "outreach"`
+  discriminator set by `POST /api/outreach` — never inferred from message text, sender
+  name or a fragile lookup. `parseNotificationData()` (`lib/notification-data.ts`)
+  strictly narrows the JSONB value; anything unrecognized falls back to the generic
+  EMAIL-002 email. Ordinary conversation `message_received` notifications carry no
+  `data` and keep the generic copy.
+- **Allowlist behavior:** `message_received` remains email-enabled (EMAIL-002 is
+  unchanged). The specialization is purely presentational — only an
+  outreach-originated `message_received` gets the outreach email; all other
+  `message_received` notifications receive the generic notification email. This is
+  the *smallest* behavior change and does not silently broaden coverage.
+- **Email content:** player name (when present), team name, opportunity title/role, a
+  clear "has contacted you… sent you a message" line and a **View Conversation** CTA
+  that opens the existing `/messages/<conversationId>` route. Missing optional fields
+  degrade gracefully; no internal ids are rendered as visible copy.
+- **Schema:** migration `0022_notification_data.sql` adds a nullable
+  `notifications.data` JSONB column (JSON-object CHECK). `createNotification()` now
+  accepts an optional typed `data` payload and persists/broadcasts it. Realtime
+  behavior and the EMAIL-002 outbox are unchanged.
+
+### Application status email (EMAIL-004)
+
+When a team (or the player) changes an application's status, the affected player's
+`application_status_changed` notification now carries an explicit, typed `data`
+payload, and the outbox processor builds a dedicated **application-status** email
+(`lib/email/templates/application-status.ts`) instead of generic notification copy.
+
+- **Status flow (unchanged):** `PATCH /api/applications/[id]` is the only status
+  writer. Valid transitions — `pending → reviewing | rejected | accepted | withdrawn`
+  and `reviewing → rejected | accepted | withdrawn`; `accepted`/`rejected`/`withdrawn`
+  are terminal. Players may only `withdrawn`; teams may only
+  `reviewing`/`rejected`/`accepted`. **Acceptance** runs the atomic `accept_application`
+  RPC and skips the notification on idempotent re-acceptance; every other status uses a
+  direct update. No status change happens without a notification, and the transition
+  map + `already_accepted` guard prevent duplicate notifications (and therefore
+  duplicate emails).
+- **How it's identified:** the `notifications.data.kind === "application_status_changed"`
+  discriminator set by the application route — never inferred from notification text.
+  `parseNotificationData()` strictly narrows the JSONB value; the payload carries only
+  presentation copy:
+  `{ kind: "application_status_changed", status, teamName?, opportunityTitle?, opportunityRole?, playerName? }`.
+- **Canonical status:** the stored `status` is the **actual enum value** (e.g.
+  `"rejected"`). User-facing copy may phrase it differently — `rejected` reads as
+  "declined", matching the existing application UI — but the payload never re-words the
+  enum. An unknown/invalid `status` is dropped so the copy falls back gracefully.
+- **Email content:** player name (when present), team name, opportunity title, a
+  status-specific sentence and a **View Application** CTA that opens the existing
+  `/player/applications/<id>` route (resolved to an absolute URL via `NEXTAUTH_URL`,
+  the same mechanism as EMAIL-003). Missing optional fields degrade gracefully; no
+  internal ids are rendered as visible copy.
+- **Subject lines:** status-specific and concise, e.g.
+  `Your application to <Team> was accepted` / `… was declined` / `… is being reviewed`
+  / `… was withdrawn`, with `Your application status was updated` as the fallback.
+- **Reuse, not new infrastructure:** EMAIL-004 only adds a specialized notification
+  email type. It reuses the durable outbox, the atomic claim, the bounded
+  exponential-backoff retries, the secret-protected processor and the EMAIL-002A
+  `after()` immediate best-effort trigger. **No migration, scheduler, cron, polling or
+  second outbox is added** — `notifications.data` (migration `0022`) already suffices,
+  and `application_status_changed` was already email-enabled.
+- **Failure isolation:** the status change never depends on email. Enqueue/`after()`/
+  Brevo failures are swallowed by `createNotification()`, and the route already wraps
+  notification creation in a guard, so the application update always succeeds.
+
+### Environment variables
+
+```env
+BREVO_API_KEY=            # secret — server only, never NEXT_PUBLIC_
+BREVO_FROM_EMAIL=notifications@fom-sports.com
+BREVO_FROM_NAME=FOM Sports
+EMAIL_DELIVERY_SECRET=    # secret — server only; guards the EMAIL-002 processor endpoint
+```
+
+- `BREVO_API_KEY` is **secret and server-only** (guarded by `server-only`; there is
+  no `NEXT_PUBLIC_` variant). It is never logged, never returned from an API route
+  and never hard-coded.
+- Values must be configured in the local `.env.local` (git-ignored — see `.gitignore`).
+- Production / preview values belong in **Vercel → Project → Settings → Environment
+  Variables**.
+- The sender (`notifications@fom-sports.com`) and the `fom-sports.com` sending domain
+  must remain **verified / authenticated in Brevo**, otherwise Brevo rejects the send.
+
+### Failure behavior
+
+`getEmailConfig()` throws an `EmailConfigError` listing only the **names** of the
+missing variables (never their values), and no partial send is attempted. Provider
+errors retain safe metadata only (HTTP status); the API key, auth headers and raw
+provider bodies are never surfaced.
+
+### Development test endpoint
+
+`GET|POST /api/debug/email-test` is a **development-only** smoke test:
+
+- Fails **closed** (`404`) whenever `NODE_ENV === "production"`.
+- Sends a **fixed** subject/body — the caller may only supply a recipient (`?to=`),
+  so it can never be used as an arbitrary production email relay.
+- Returns the Brevo `messageId` on success.
+
+```bash
+# with `npm run dev` running
+curl "http://localhost:3000/api/debug/email-test?to=you@example.com"
+```
+
+### Email delivery processor (EMAIL-002 / EMAIL-002A)
+
+There are two ways the durable outbox is drained — both call the **same**
+`processEmailDeliveries()` (there is no second processor):
+
+1. **Immediate best-effort (EMAIL-002A).** A fresh enqueue in
+   `createNotification()` schedules `processEmailDeliveries()` via Next.js
+   `after()`. The callback runs *after* the response is sent, so the user-facing
+   request never waits on Brevo. Failures in this path are logged safely and can
+   never fail the marketplace operation.
+2. **Manual / scheduled.** `GET|POST /api/email/deliveries/process` is **not**
+   user-facing and fails **closed** (`404`) unless the caller presents the
+   `EMAIL_DELIVERY_SECRET`:
+
+```bash
+# with EMAIL_DELIVERY_SECRET configured
+curl -X POST "https://<host>/api/email/deliveries/process" \
+  -H "Authorization: Bearer $EMAIL_DELIVERY_SECRET"
+```
+
+- **Immediate delivery is best-effort.** It performs the first attempt only.
+  Failed deliveries remain durably queued with their existing retry/backoff state;
+  without a recurring scheduler, a future retry requires another invocation of the
+  existing processing path (the endpoint above, or another notification that drains
+  the queue). Retries are **not** guaranteed under this design.
+- Claiming is atomic (`FOR UPDATE SKIP LOCKED`), so overlapping invocations can
+  never send the same email twice.
+- Retries use exponential backoff (60s → 120s → 240s …, capped at 6h) via
+  `available_at`, bounded by a **maximum of 5 total attempts** (attempt 5 failure →
+  `failed`; a 6th attempt is impossible — enforced in both the processor and the
+  claim RPC).
+- A worker that crashes mid-send cannot strand a row: deliveries left in
+  `sending` beyond a stale timeout are requeued automatically.
+- `last_error` stores a short, sanitised reason only — never API keys, auth
+  headers or raw provider payloads.
 
 ---
 
@@ -966,6 +1194,10 @@ Team reviews application → PATCH /api/applications/[id] { status: "accepted" }
 | `NEXTAUTH_URL` | NextAuth | Production URL |
 | `REALTIME_CHANNEL_SECRET` | `lib/realtime-broadcast.ts` | HMAC signing for realtime channels |
 | `MULTI_TEAM_ADMIN_USER_ID` | `lib/multi-team.ts`, `lib/competition-server.ts` | profiles.id of the multi-team admin (server-only). COMP-007 reuses it as the **only** user allowed to create competitions — server-only, never `NEXT_PUBLIC_`, fails closed when unset. |
+| `BREVO_API_KEY` | `lib/email/config.ts`, `lib/email/providers/brevo.ts` | **Secret** — server only (EMAIL-001). Authenticates the Brevo v3 transactional email API. Never `NEXT_PUBLIC_`, never logged. |
+| `BREVO_FROM_EMAIL` | `lib/email/config.ts` | Verified Brevo sender address (e.g. `notifications@fom-sports.com`). Fails safely when unset. |
+| `BREVO_FROM_NAME` | `lib/email/config.ts` | Sender display name (e.g. `FOM Sports`). Fails safely when unset. |
+| `EMAIL_TEST_RECIPIENT` | `app/api/debug/email-test/route.ts` | Optional. Default recipient for the **development-only** email smoke test when `?to=` is omitted. |
 
 ---
 
@@ -991,6 +1223,18 @@ Team reviews application → PATCH /api/applications/[id] { status: "accepted" }
 | `lib/competition-drawing-migration.test.ts` | COMP-006 migration (0020): table/RPC/unique-index/RLS shape, server-side random selection, one-drawing-per-event, immutability, no edits to prior migrations |
 | `lib/competition-public-server.test.ts` | COMP-007 public results: no-auth access, qualified-only participants, persisted winner (and no winner before drawing), player-profile linking (and safe non-linking), public-safe field projection and privacy |
 | `lib/competition-creation-auth.test.ts` | COMP-007 creation restriction: `isCompetitionCreationAdmin` (admin/ambassador/player/missing env), `createCompetitionEvent` allows only the admin and fails closed |
+| `lib/email/config.test.ts` | EMAIL-001 config: resolves `BREVO_*`, fails safely on each missing variable, treats whitespace as missing, lists only variable NAMES (never values) |
+| `lib/email/providers/brevo.test.ts` | EMAIL-001 Brevo provider: payload (recipient/sender/subject/html/text), `api-key` header, mocked fetch success + message id, non-2xx, network failure, no key leakage |
+| `lib/email/email-service.test.ts` | EMAIL-001 service: recipient validation, provider delegation, recipient trimming, `server-only` boundary enforcement |
+| `app/api/debug/email-test/__tests__/route.test.ts` | EMAIL-001 dev test route: hard fail-closed `404` in production, fixed subject/body (client-supplied values ignored), recipient fallback, safe error mapping |
+| `lib/email/notification-delivery.test.ts` | EMAIL-002/002A outbox: type allowlist, sanitisation, email build/escaping, enqueue + dedupe, processor (sent/retry/failed/missing-notification), the immediate `after()` trigger, and the bounded 5-attempt retry ladder (attempts 1–4 retryable, attempt 5 → `failed`, no 6th attempt) |
+| `lib/email/notification-delivery-migration.test.ts` | EMAIL-002 migration 0021: table, UNIQUE(notification_id), status CHECK, indexes, RLS with no policies, atomic claim and stale recovery |
+| `lib/email/notification-delivery-integration.test.ts` | EMAIL-002/002A `createNotification()` integration: enqueue on create, immediate trigger on a fresh enqueue only, no trigger on dedupe/skip, realtime unchanged, and enqueue/trigger failures never fail notification creation |
+| `app/api/email/deliveries/process/__tests__/route.test.ts` | EMAIL-002 processor route: fail-closed `404`, secret auth (bearer + header), GET/POST, no internal leakage |
+| `lib/notification-data.test.ts` | EMAIL-003/004 typed payload: outreach + application-status recognition/normalization, canonical status preserved, invalid status dropped, empty-field dropping, strict null fallback for unknown/non-object values |
+| `lib/notification-data-migration.test.ts` | EMAIL-003 migration 0022: nullable `data` JSONB column, JSON-object CHECK, RLS/dedup/realtime untouched |
+| `lib/email/outreach-message.test.ts` | EMAIL-003 outreach template: team/opportunity/player copy, dedicated subject, `View Conversation` CTA, no internal ids as visible copy, graceful missing-data, HTML escaping |
+| `lib/email/templates/application-status.test.ts` | EMAIL-004 application-status template: status-specific subject/copy, team/opportunity/player copy, `View Application` CTA, no internal ids as visible copy, graceful missing-data, `rejected`→"declined" copy, HTML escaping |
 | `lib/matching/*.test.ts` | Matching engine: engine, applications, mvp014, player-experience, team-applications |
 | `app/api/**/__tests__/` | API routes: applications (acceptance, withdrawal), messages, notifications, outreach, team invites, team join, competitions (create + event/ambassador handlers) |
 | `app/homepage.test.ts` | Homepage rendering |
@@ -1039,6 +1283,7 @@ npm test          # Vitest
 - ✅ Team invite links (reusable, token-hashed, revocable, expiring)
 - ✅ Team memberships (canonical roster, one-team-per-player MVP rule)
 - ✅ Multi-team support (admin-gated)
+- ✅ Application status email notifications (EMAIL-004 — `application_status_changed` notifications carry an explicit typed `data` payload (`kind: "application_status_changed"`; canonical `status` enum plus team/opportunity/player copy) that the outbox processor uses to build a status-specific email via `lib/email/templates/application-status.ts` with a `View Application` CTA to the existing `/player/applications/<id>` route (`rejected` is phrased as "declined", matching the app UI). Reuses the existing EMAIL-002/002A outbox, `after()` immediate processing, retry/backoff and processor — no new migration, scheduler, outbox or template-dispatch system. Also adds the `position` field to the PATCH opportunity select so the email has correct position context.)
 - ✅ Homepage with personalized recommendations
 - ✅ Competitions foundation (COMP-001 — data model, types, authorization, server helpers)
 - ✅ Competitions management (COMP-002 — `/competitions` create/manage pages, event editing, controlled lifecycle, ambassador add/remove by email, basic statistics)
@@ -1047,6 +1292,10 @@ npm test          # Vitest
 - ✅ Ambassador event-day operations (COMP-005 — ambassadors run an event: view participants, verify, record attempts and see qualification, via the shared `canManageEvent` creator-or-ambassador rule; creator-only administration preserved)
 - ✅ Competition drawing & winner selection (COMP-006 — managers run one atomic, server-side drawing over qualified participants, selecting exactly one winner persisted immutably in `competition_drawings`; one drawing per event enforced at the database level; the winner is shown to the creator and assigned ambassador. No rerolls or prizes.)
 - ✅ Public competition results dashboard + admin-only creation (COMP-007 — no-auth `/competitions/results` dashboard showing competitions, qualified participants and the persisted winner, with links to existing public player profiles; competition **creation** temporarily restricted to the `MULTI_TEAM_ADMIN_USER_ID` user, enforced server-side, while ambassador operational permissions are unchanged)
+- ✅ Transactional email infrastructure (EMAIL-001 — server-only Brevo transport behind a small generic `sendTransactionalEmail()` abstraction, environment validation that fails safely, a reusable FOM email shell with a plain-text fallback, and a development-only test endpoint that fails closed in production. No marketplace flow integrates email yet.)
+- ✅ Email notification outbox (EMAIL-002 — durable `email_notification_deliveries` table keyed one-per-notification, RLS with no client access, concurrency-safe atomic claiming (`FOR UPDATE SKIP LOCKED`), bounded exponential-backoff retries, stale `sending` recovery, a small centralized email-enabled type allowlist, integration only through `createNotification()`, and a secret-protected server-only processor endpoint. No scheduler ships; invoke the endpoint externally. Detailed templates are deferred to EMAIL-003/EMAIL-004.)
+- ✅ Team contacts player email (EMAIL-003 — outreach-originated `message_received` notifications carry an explicit typed `data` payload (`kind: "outreach"`) that the outbox processor uses to build a dedicated "team contacted you" email with team name, opportunity title/role, optional player name and a `View Conversation` CTA to the existing conversation. Non-outreach `message_received` notifications keep the generic EMAIL-002 copy. Adds migration `0022_notification_data.sql` (nullable `notifications.data` JSONB).)
+- ✅ Immediate email delivery & retry reliability (EMAIL-002A — a fresh enqueue in `createNotification()` kicks the **existing** EMAIL-002 processor via Next.js `after()`, so the first send attempt happens immediately after the response without the marketplace request ever waiting on Brevo. Attempts are bounded to a **maximum of 5 total** (attempt 5 failure → `failed`; a 6th attempt is impossible — enforced in both the processor and the claim RPC), and Brevo failures never fail the underlying marketplace operation. No new scheduler, cron, polling loop, outbox or processor is introduced; immediate delivery is best-effort and without a recurring scheduler a future retry requires another invocation of the existing processing path.)
 
 ---
 
@@ -1141,6 +1390,8 @@ This section tells you **where to look** for common changes. Read the relevant s
 | Invites | Token-hashed, derived state, reusable |
 | Memberships | Canonical source is `team_memberships` — never derive from applications/outreach |
 | Notifications | Server-side creation only, dedup via partial unique indexes |
+| Email | Server-only (`lib/email`, `server-only`). Call `sendTransactionalEmail()`; never import the Brevo provider directly. Email delivery is queued via `email_notification_deliveries` (EMAIL-002) and drained by the secret-protected `/api/email/deliveries/process` processor. Secrets never `NEXT_PUBLIC_`, never logged. |
+| Email outbox | `email_notification_deliveries` — one row per email-enabled notification (UNIQUE `notification_id`), RLS with **no client policies**, PostgreSQL as the durable queue. |
 | Realtime | HMAC-signed channels, participant-verified |
 | Colors | Use `lib/colors.ts` constants, not hardcoded Tailwind classes |
 | Types | All shared types in `types/index.ts`; feature types in `features/<feature>/types.ts` |

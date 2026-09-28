@@ -271,6 +271,105 @@ describe("Messaging API - Notification Creation", () => {
     expect(callArgs?.userId).toBe("user-2");
   });
 
+  it("normal message notification does NOT carry an outreach payload (EMAIL-003)", async () => {
+    vi.mocked(getServerSession).mockResolvedValue(
+      createMockSession("user-1"),
+    );
+
+    // Mock participant check to pass
+    vi.mocked(supabaseAdmin.from).mockImplementationOnce(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            single: vi.fn().mockResolvedValue({ data: { id: "participant-1" }, error: null }),
+          })),
+        })),
+      })),
+    } as any));
+
+    // Mock message insert
+    vi.mocked(supabaseAdmin.from).mockImplementationOnce(() => ({
+      insert: vi.fn(() => ({
+        select: vi.fn(() => ({
+          single: vi.fn().mockResolvedValue({
+            data: {
+              id: "msg-1",
+              conversation_id: "conv-1",
+              sender_id: "user-1",
+              body: "Hello",
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              sender: { id: "user-1", full_name: "Test User", avatar_url: null },
+            },
+            error: null,
+          }),
+        })),
+      })),
+    } as any));
+
+    // Mock conversation fetch
+    vi.mocked(supabaseAdmin.from).mockImplementationOnce(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          single: vi.fn().mockResolvedValue({
+            data: {
+              id: "conv-1",
+              application: {
+                opportunity: {
+                  team: { user_id: "user-2", team_name: "Test Team" },
+                },
+                player_profile: { user_id: "user-1" },
+              },
+            },
+            error: null,
+          }),
+        })),
+      })),
+    } as any));
+
+    // Mock sender profile fetch
+    vi.mocked(supabaseAdmin.from).mockImplementationOnce(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          single: vi.fn().mockResolvedValue({
+            data: { full_name: "Test User" },
+            error: null,
+          }),
+        })),
+      })),
+    } as any));
+
+    // Mock other participants fetch
+    vi.mocked(supabaseAdmin.from).mockImplementationOnce(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          neq: vi.fn().mockResolvedValue({
+            data: [{ user_id: "user-2" }],
+            error: null,
+          }),
+        })),
+      })),
+    } as any));
+
+    const { POST } = await import("../[conversationId]/route");
+    const response = await POST(
+      new Request("http://localhost/api/messages/conv-1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: "Hello" }),
+      }),
+      { params: Promise.resolve({ conversationId: "conv-1" }) },
+    );
+
+    expect(response.status).toBe(201);
+
+    // A normal conversation message must never be tagged as outreach, so the
+    // email layer keeps sending generic copy (no specialized outreach email).
+    const callArgs = vi.mocked(createNotification).mock.calls[0]?.[0];
+    expect(callArgs?.type).toBe("message_received");
+    expect(callArgs?.data).toBeUndefined();
+  });
+
   it("notification points to the correct conversation", async () => {
     vi.mocked(getServerSession).mockResolvedValue(
       createMockSession("user-1"),
@@ -791,5 +890,162 @@ describe("Applications API - Status Change Notifications", () => {
     expect(validTransitions.accepted).toHaveLength(0);
     expect(validTransitions.rejected).toHaveLength(0);
     expect(validTransitions.withdrawn).toHaveLength(0);
+  });
+});
+
+// ─── Tests: EMAIL-004 Application Status Email Payloads ────────
+
+describe("EMAIL-004: application status notifications carry structured data", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function mockApplicationForStatus(currentStatus: string) {
+    vi.mocked(getServerSession).mockResolvedValue(
+      createMockSession("team-user-2", ["team"]),
+    );
+    vi.mocked(supabaseAdmin.from).mockImplementationOnce(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          single: vi.fn().mockResolvedValue({
+            data: {
+              id: "app-1",
+              status: currentStatus,
+              opportunity: {
+                team_id: "team-1",
+                title: "Striker Opportunity",
+                position: "ST",
+                team: { user_id: "team-user-2", team_name: "Phoenix United" },
+              },
+              player_profile: { user_id: "player-user-1" },
+            },
+            error: null,
+          }),
+        })),
+      })),
+    } as any));
+  }
+
+  function mockStatusUpdate(newStatus: string) {
+    vi.mocked(supabaseAdmin.from).mockImplementationOnce(() => ({
+      update: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          select: vi.fn(() => ({
+            single: vi.fn().mockResolvedValue({
+              data: {
+                id: "app-1",
+                status: newStatus,
+                opportunity_id: "opp-1",
+                player_profile_id: "player-profile-1",
+                cover_message: null,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              },
+              error: null,
+            }),
+          })),
+        })),
+      })),
+    } as any));
+  }
+
+  async function callPatch(status: string) {
+    const { PATCH } = await import("../../applications/[id]/route");
+    return PATCH(
+      new Request("http://localhost/api/applications/app-1", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      }),
+      { params: Promise.resolve({ id: "app-1" }) },
+    );
+  }
+
+  it("rejected transition notifies the player with a structured payload", async () => {
+    mockApplicationForStatus("pending");
+    mockStatusUpdate("rejected");
+
+    const response = await callPatch("rejected");
+    expect(response.status).toBe(200);
+
+    const callArgs = vi.mocked(createNotification).mock.calls[0]?.[0] as any;
+    expect(callArgs.userId).toBe("player-user-1");
+    expect(callArgs.type).toBe("application_status_changed");
+    expect(callArgs.link).toBe("/player/applications/app-1");
+    // The canonical enum value is preserved in the payload (never re-worded).
+    expect(callArgs.data).toEqual({
+      kind: "application_status_changed",
+      status: "rejected",
+      teamName: "Phoenix United",
+      opportunityTitle: "Striker Opportunity",
+      opportunityRole: "ST",
+    });
+  });
+
+  it("reviewing transition notifies the player with a structured payload", async () => {
+    mockApplicationForStatus("pending");
+    mockStatusUpdate("reviewing");
+
+    const response = await callPatch("reviewing");
+    expect(response.status).toBe(200);
+
+    const callArgs = vi.mocked(createNotification).mock.calls[0]?.[0] as any;
+    expect(callArgs.data).toEqual({
+      kind: "application_status_changed",
+      status: "reviewing",
+      teamName: "Phoenix United",
+      opportunityTitle: "Striker Opportunity",
+      opportunityRole: "ST",
+    });
+  });
+
+  it("player withdrawal notifies the player with a structured payload", async () => {
+    // The player performing the withdrawal is the recipient.
+    vi.mocked(getServerSession).mockResolvedValue(
+      createMockSession("player-user-1", ["player"]),
+    );
+    vi.mocked(supabaseAdmin.from).mockImplementationOnce(() => ({
+      select: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          single: vi.fn().mockResolvedValue({
+            data: {
+              id: "app-1",
+              status: "pending",
+              opportunity: {
+                team_id: "team-1",
+                title: "Striker Opportunity",
+                position: "ST",
+                team: { user_id: "team-user-2", team_name: "Phoenix United" },
+              },
+              player_profile: { user_id: "player-user-1" },
+            },
+            error: null,
+          }),
+        })),
+      })),
+    } as any));
+    mockStatusUpdate("withdrawn");
+
+    const response = await callPatch("withdrawn");
+    expect(response.status).toBe(200);
+
+    const callArgs = vi.mocked(createNotification).mock.calls[0]?.[0] as any;
+    expect(callArgs.userId).toBe("player-user-1");
+    expect(callArgs.data).toEqual({
+      kind: "application_status_changed",
+      status: "withdrawn",
+      teamName: "Phoenix United",
+      opportunityTitle: "Striker Opportunity",
+      opportunityRole: "ST",
+    });
+  });
+
+  it("an invalid transition does not create a notification or email payload", async () => {
+    // accepted → reviewing is not a valid transition.
+    mockApplicationForStatus("accepted");
+
+    const response = await callPatch("reviewing");
+    expect(response.status).toBe(400);
+    expect(createNotification).not.toHaveBeenCalled();
   });
 });

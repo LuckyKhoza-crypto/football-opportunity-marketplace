@@ -82,7 +82,7 @@ export async function POST(request: Request) {
     // Verify opportunity belongs to this team
     const { data: opportunity } = await supabaseAdmin
       .from("opportunities")
-      .select("id, team_id, title, status")
+      .select("id, team_id, title, position, status")
       .eq("id", opportunity_id)
       .single();
 
@@ -187,6 +187,15 @@ export async function POST(request: Request) {
       body: `${teamName} contacted you about "${opportunity.title ?? "an opportunity"}".`,
       link: `/messages/${rpcResult.conversation_id}`,
       sourceId: rpcResult.message_id,
+      // EMAIL-003: explicit discriminator so the email layer can reliably build
+      // the "Team contacts player" email (never inferred from copy).
+      data: {
+        kind: "outreach",
+        teamName,
+        opportunityTitle: opportunity.title ?? undefined,
+        opportunityRole: opportunity.position ?? null,
+        playerName: playerProfileData?.full_name ?? undefined,
+      },
     }).catch((err) => {
       console.error("Outreach notification failed:", err);
     });

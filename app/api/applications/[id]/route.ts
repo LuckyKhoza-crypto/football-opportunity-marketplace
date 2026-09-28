@@ -180,6 +180,7 @@ export async function PATCH(
         opportunity:opportunity_id (
           team_id,
           title,
+          position,
           team:team_id (
             user_id,
             team_name
@@ -309,6 +310,7 @@ export async function PATCH(
       if (!rpcResult.already_accepted) {
         try {
           const teamName = application.opportunity?.team?.team_name ?? "the team";
+          const opportunityTitle = application.opportunity?.title ?? undefined;
           const positionLabel = application.opportunity?.position
             ? (POSITION_LABELS[application.opportunity.position] ?? application.opportunity.position)
             : "your position";
@@ -319,6 +321,15 @@ export async function PATCH(
             title: "Application updated",
             body: `${teamName} has accepted your application for ${positionLabel}.`,
             link: `/player/applications/${id}`,
+            // EMAIL-004: explicit discriminator so the email layer can build the
+            // application-status email (never inferred from copy).
+            data: {
+              kind: "application_status_changed",
+              status: "accepted",
+              teamName,
+              opportunityTitle,
+              opportunityRole: application.opportunity?.position ?? null,
+            },
           });
         } catch (notifErr) {
           // Notification failure should not fail the status change
@@ -389,6 +400,15 @@ export async function PATCH(
         title: "Application updated",
         body,
         link: `/player/applications/${id}`,
+        // EMAIL-004: explicit discriminator so the email layer can build the
+        // application-status email (never inferred from copy).
+        data: {
+          kind: "application_status_changed",
+          status: newStatus as ApplicationStatus,
+          teamName,
+          opportunityTitle: application.opportunity?.title ?? undefined,
+          opportunityRole: application.opportunity?.position ?? null,
+        },
       });
     } catch (notifErr) {
       // Notification failure should not fail the status change
