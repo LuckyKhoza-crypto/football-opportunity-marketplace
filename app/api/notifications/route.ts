@@ -33,7 +33,10 @@ export async function GET(request: Request) {
     // Fetch the user's notifications, newest first
     const { data: notifications, error } = await supabaseAdmin
       .from("notifications")
-      .select("id, type, title, body, link, read_at, created_at")
+      // EMAIL-003: `data` is a non-sensitive presentation payload (team name,
+      // opportunity title/role, player name). It is only ever returned to the
+      // owning user and never contains ids, secrets, or email addresses.
+      .select("id, type, title, body, link, data, read_at, created_at")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);

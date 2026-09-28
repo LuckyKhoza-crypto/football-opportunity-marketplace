@@ -43,6 +43,7 @@ vi.mock("@/lib/realtime-broadcast", () => ({
 
 import { getServerSession } from "next-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { createNotification } from "@/lib/notifications";
 
 function createMockSession(userId: string, roles: string[] = ["team"]) {
   return {
@@ -146,6 +147,7 @@ describe("Outreach API", () => {
           player_profile_id: "player-1",
           opportunity_id: "opp-1",
           message: "Hey John, we'd love to talk!",
+          team_id: "team-1",
         }),
       }),
     );
@@ -163,6 +165,23 @@ describe("Outreach API", () => {
         p_player_profile_id: "player-1",
         p_initial_message: "Hey John, we'd love to talk!",
         p_user_id: "team-user",
+      }),
+    );
+
+    // EMAIL-003: the notification must carry an explicit outreach payload so the
+    // email layer can reliably build the "team contacted you" email.
+    expect(createNotification).toHaveBeenCalledTimes(1);
+    expect(createNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "player-user",
+        type: "message_received",
+        link: "/messages/conv-1",
+        sourceId: "msg-1",
+        data: expect.objectContaining({
+          kind: "outreach",
+          teamName: "Test Team",
+          opportunityTitle: "Test Opp",
+        }),
       }),
     );
   });
@@ -197,6 +216,7 @@ describe("Outreach API", () => {
           player_profile_id: "player-1",
           opportunity_id: "opp-1",
           message: "Hello",
+          team_id: "team-1",
         }),
       }),
     );
@@ -218,6 +238,7 @@ describe("Outreach API", () => {
           player_profile_id: "player-1",
           opportunity_id: "opp-1",
           message: "   ",
+          team_id: "team-1",
         }),
       }),
     );

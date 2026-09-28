@@ -137,6 +137,14 @@ describe("PATCH /api/applications/[id] — Team acceptance → membership", () =
       title: "Application updated",
       body: "Phoenix Pro Stars FC has accepted your application for Center Back.",
       link: `/player/applications/${APP_ID}`,
+      // EMAIL-004: structured payload drives the application-status email.
+      data: {
+        kind: "application_status_changed",
+        status: "accepted",
+        teamName: "Phoenix Pro Stars FC",
+        opportunityTitle: "Center Back Opportunity",
+        opportunityRole: "CB",
+      },
     });
   });
 

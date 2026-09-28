@@ -33,6 +33,7 @@ import { LifecycleControls } from "./LifecycleControls";
 import { AmbassadorManager } from "./AmbassadorManager";
 import { JoinLinkManager } from "./JoinLinkManager";
 import { DrawingPanel } from "./DrawingPanel";
+import { TournamentPanel } from "./TournamentPanel";
 import { getCompetitionJoinLinks } from "@/lib/competition-join-server";
 import {
   getCompetitionDrawing,
@@ -343,6 +344,12 @@ export default async function CompetitionDetailPage({
               initialDrawing={drawing}
             />
           </section>
+
+          {/* TOURN-002 — external tournament management: create/link → sync
+              participants → start → read-only bracket. Available to the
+              creator AND assigned ambassadors; every action is authorized
+              server-side by the tournament service (canManageEvent). */}
+          <TournamentPanel eventId={event.id} />
 
           {/* Creator-only: lifecycle + ambassador management + join links */}
           {isManager && (
