@@ -62,7 +62,7 @@ A two-sided marketplace connecting football players with team opportunities. Pla
 ┌─────────────────────────────────────────────────────────────────────┐
 │                            Supabase                                 │
 │                                                                     │
-│  PostgreSQL (18 migrations)  ·  Storage (photos/logos)  ·  Realtime │
+│  PostgreSQL (23 migrations)  ·  Storage (photos/logos)  ·  Realtime │
 │  RLS enabled on all tables (defense-in-depth)                       │
 │  SECURITY DEFINER RPCs for atomic multi-table operations            │
 └─────────────────────────────────────────────────────────────────────┘
@@ -154,6 +154,7 @@ football-opportunity-marketplace/
 │   ├── competition-drawing.ts    # Pure drawing eligibility helpers (COMP-006, no I/O)
 │   ├── competition-drawing-server.ts # Server drawing start/read (COMP-006, atomic RPC)
 │   ├── competition-drawing-api.ts    # COMP-006 drawing route handlers
+│   ├── tournament-api.ts         # TOURN-002/003 tournament route handlers (create/sync/start/read + result + finalize)
 │   ├── competition-public-server.ts  # Public competition results query (COMP-007, public data boundary)
 │   ├── team-profile.ts           # Team profile completeness calculator
 │   ├── player-profile.ts         # Player profile completeness calculator
@@ -167,6 +168,18 @@ football-opportunity-marketplace/
 │   ├── use-notifications-realtime.ts  # Realtime notification subscription hook
 │   ├── use-conversation-realtime.ts   # Realtime conversation message hook
 │   ├── invite-callback.ts        # Safe callbackUrl validation (open-redirect protection)
+│   ├── integrations/             # Server-only third-party integrations
+│   │   ├── challonge-poc/        # Isolated Challonge v1 POC (evidence artefact, not imported by the app)
+│   │   └── tournament/           # TOURN-001 provider-neutral tournament integration
+│   │       ├── types.ts          # TournamentProvider contract + FOM-neutral types
+│   │       ├── contract.ts       # Pure provider-neutral helpers + format vocabulary (no I/O)
+│   │       ├── slug.ts           # Deterministic, provider-safe slug/name derivation
+│   │       ├── registry.ts       # Provider selection: "challonge" → ChallongeProvider
+│   │       ├── service.ts        # FOM orchestration: authorization + Supabase mapping + HTTP mapping
+│   │       ├── errors.ts         # Safe, typed provider errors (never the API key)
+│   │       ├── config.ts         # CHALLONGE_API_KEY resolution (fails safely)
+│   │       ├── providers/challonge.ts  # Challonge v1 adapter — the ONLY Challonge-aware module
+│   │       └── index.ts          # Barrel export (the entry point feature code imports)
 │   ├── email/                    # Transactional email infrastructure (EMAIL-001 / EMAIL-002)
 │   │   ├── email-service.ts      # Server-only sendTransactionalEmail() entry point
 │   │   ├── notification-delivery.ts  # Durable email notification outbox (enqueue + processor)
@@ -181,7 +194,7 @@ football-opportunity-marketplace/
 │   ├── colors.ts                 # Centralized color tokens
 │   └── utils.ts                  # shadcn cn() helper
 │
-├── supabase/migrations/          # 18 SQL migrations (see Database Schema)
+├── supabase/migrations/          # 24 SQL migrations (see Database Schema)
 ├── types/index.ts                # All shared TypeScript types + option constants
 ├── public/images/                # Static images
 ├── app_roadmap.md                # MVP-004 → MVP-022 tickets
@@ -240,8 +253,8 @@ All tables have RLS enabled. The application uses `supabaseAdmin` (service role)
 | `outreach` | Team-initiated contact | `opportunity_id`, `team_profile_id`, `player_profile_id`, `initial_message`, `status` (`pending`/`accepted`/`declined`/`withdrawn`), UNIQUE(`opportunity_id`, `team_profile_id`, `player_profile_id`) |
 | `team_memberships` | Canonical "player is on team" | `team_profile_id`, `player_profile_id`, `position`, `role`, `status` (only `active`), UNIQUE index on `player_profile_id` (one-team-per-player MVP rule) |
 | `team_invites` | Reusable shared recruitment links | `team_profile_id`, `token_hash` (SHA-256, UNIQUE), `created_by`, `expires_at`, `revoked_at`. **No status column** — state is derived from timestamps. |
-| `competition_events` | Competition events (COMP-001) | `name`, `description`, `location`, `event_date TIMESTAMPTZ`, `status` (`draft`/`active`/`drawing`/`completed`/`cancelled`), `challenge_name`, `challenge_threshold`, `max_attempts`, `created_by` (FK profiles, authoritative manager) |
-| `competition_participants` | A profile's participation in an event (COMP-001) | `event_id` (FK competition_events), `profile_id` (FK **profiles** — NOT player_profiles), `status` (`registered`/`challenge_pending`/`qualified`/`not_qualified`), `checked_in_at`, UNIQUE(`event_id`, `profile_id`) |
+| `competition_events` | Competition events (COMP-001) | `name`, `description`, `location`, `event_date TIMESTAMPTZ`, `status` (`draft`/`active`/`drawing`/`completed`/`cancelled`), `challenge_name`, `challenge_threshold`, `max_attempts`, `created_by` (FK profiles, authoritative manager), `provider` + `provider_tournament_id` + `tournament_format` (TOURN-001/002A — nullable external tournament mapping plus the FOM format it was created with; the provider columns are set together by a CHECK, and `tournament_format` is set in the same UPDATE as the mapping, backfilled to `single_elimination` for tournaments created before TOURN-002A) |
+| `competition_participants` | A profile's participation in an event (COMP-001) | `event_id` (FK competition_events), `profile_id` (FK **profiles** — NOT player_profiles), `status` (`registered`/`challenge_pending`/`qualified`/`not_qualified`), `checked_in_at`, `provider_participant_id` (TOURN-001 — nullable provider participant mapping), UNIQUE(`event_id`, `profile_id`) |
 | `competition_ambassadors` | Competition-specific ambassador authorization (COMP-001) | `event_id` (FK competition_events), `profile_id` (FK profiles), UNIQUE(`event_id`, `profile_id`). **Never derived from `profiles.role`.** |
 | `competition_join_links` | Reusable ambassador join links / QR codes (COMP-003) | `event_id` (FK competition_events), `ambassador_id` (FK **competition_ambassadors** — the link owner is the ambassador relation, not a profile), `token_hash` (SHA-256 of the raw token, UNIQUE), `revoked_at`. The raw token is never stored. |
 | `competition_attempts` | One physical challenge attempt per row (COMP-004) | `event_id` (FK competition_events), `participant_id` (FK competition_participants), `attempt_number` (server-assigned, 1-based), `result_value NUMERIC` (generic — no unit baked in), `passed` (server-computed), `recorded_by_profile_id` (FK profiles), UNIQUE(`participant_id`, `attempt_number`). A `BEFORE INSERT` trigger rejects cross-event participants and attempts beyond the event's `max_attempts`. |
@@ -428,7 +441,7 @@ competitions are built on `profiles` + the auth session only.
 |---|---|---|
 | `/competitions` | `app/competitions/page.tsx` | Management page: competitions created by the current profile + events they are an ambassador for. The **Create Competition** action is shown only to the competition-creation admin (COMP-007). |
 | `/competitions/new` | `app/competitions/new/page.tsx` | Create a competition event (starts in `draft`). **COMP-007:** server-guarded — only the profile whose id equals `MULTI_TEAM_ADMIN_USER_ID` may render it; anyone else gets a `404`. |
-| `/competitions/[id]` | `app/competitions/[id]/page.tsx` | Role-aware management page. Both creator and ambassador see event details, stats and the "Run Competition" (participant operations) entry point; only the creator additionally sees edit/lifecycle/ambassadors/join links. |
+| `/competitions/[id]` | `app/competitions/[id]/page.tsx` | Role-aware management page. Both creator and ambassador see event details, stats, the "Run Competition" (participant operations) entry point and the **Tournament panel** (TOURN-002/003: create → sync participants → start → report results → finalize → winner); only the creator additionally sees edit/lifecycle/ambassadors/join links. |
 | `/competitions/[id]/edit` | `app/competitions/[id]/edit/page.tsx` | Edit event configuration (creator only; server-verified). |
 
 ### Public Competition Results (COMP-007)
@@ -577,6 +590,13 @@ All API routes verify auth via `getServerSession(authOptions)` and use `supabase
 | `/api/competitions/[id]/pass-token` | POST | Mint the authenticated participant's own opaque verification token (stores only the SHA-256 digest; returns the raw token once for the pass QR). |
 | `/api/competitions/[id]/draw` | GET | COMP-006. Return the drawing result (winner name, eligible count, timestamp — never database ids) if one exists. Creator **or** assigned ambassador only; an unrelated user gets an opaque `404`. |
 | `/api/competitions/[id]/draw` | POST | COMP-006. **Start the drawing.** The request body is ignored — the winner is selected server-side by the `start_competition_drawing` RPC and the eligible count is calculated server-side. Creator **or** assigned ambassador. No qualified participants → `409`; a second drawing → `409`. |
+| `/api/competitions/[id]/tournament` | POST | TOURN-002. **Create/link the external tournament.** Body ignored (provider, format, slug, name resolved server-side). Creator **or** assigned ambassador. Already linked → `409`. Returns the tournament's neutral status (`201`). |
+| `/api/competitions/[id]/tournament` | GET | TOURN-002. Tournament status (state, completeness, open matches, champion participant id). `409` + `code: "not_linked"` means the competition has no tournament yet — a state, not an error. Creator **or** assigned ambassador. |
+| `/api/competitions/[id]/tournament/participants` | POST | TOURN-002. **Sync participants**: pushes registered participants that are not yet mapped and stores the returned provider ids (existing service, idempotent). Responds with counts only — `{ synced, alreadyMapped, total }`, never provider ids. Creator **or** assigned ambassador. |
+| `/api/competitions/[id]/tournament/start` | POST | TOURN-002. **Start the tournament** (generates the bracket). Idempotent (`started: false` when already started); completed/unrecognised provider state → `409`. No bracket state is copied into Supabase. Creator **or** assigned ambassador. |
+| `/api/competitions/[id]/tournament/matches` | GET | TOURN-002/003. **Read-only bracket**: neutral tournament state, mapped participants (FOM participant id + name) and every match (round, both sides, score, state, winner, and FOM's own `matchRef` for a reportable match). Provider match ids, provider participant ids and raw provider score fields are never returned. Creator **or** assigned ambassador. |
+| `/api/competitions/[id]/tournament/matches/[matchId]/result` | POST | TOURN-003. **Report a match result.** The body carries FOM-neutral data only — `winnerParticipantId` (a `competition_participants.id`) plus `participant1Score`/`participant2Score`; the `[matchId]` segment is FOM's own match reference (`r{round}:{id}:{id}`), never a provider id. Provider-specific fields in the body (`winner_id`, `scores_csv`, a provider match id, …) are ignored. The **provider** advances the winner — FOM performs no bracket calculation; the caller re-reads `GET …/matches` afterwards. Creator **or** assigned ambassador. `400` malformed body / draw / winner not in the match, `404` match not in this tournament, `409` not linked / not started / already complete / match already settled / match not ready. |
+| `/api/competitions/[id]/tournament/finalize` | POST | TOURN-003. **Explicitly finalize** the tournament after the last result — the provider's engine can keep a fully-played bracket awaiting review, so finalization is a deliberate second step. The request body is ignored; whether the tournament may be finalized is the **provider's** verdict (a refusal is surfaced as an honest provider-neutral error). Idempotent for an already-complete tournament (`finalized: false`). Returns the neutral status plus the champion as a `competition_participants.id`. Creator **or** assigned ambassador. |
 
 ### Debug
 
@@ -778,6 +798,428 @@ a later ticket (e.g. COMP-007) must own `drawing → completed`.
 | Add / remove ambassadors | ✅ | ❌ | ❌ |
 
 All checks run server-side; disabled UI is never the authorization boundary.
+
+---
+
+## Tournament Provider Integration (TOURN-001)
+
+FOM runs competitive brackets on an **external tournament engine**. FOM does not know
+*which* engine: every tournament operation goes through a provider-neutral contract, and
+the only module in the codebase that knows Challonge exists is the Challonge adapter.
+
+```
+FOM competition code / service
+        │
+        ▼
+TournamentProvider  (contract)      lib/integrations/tournament/types.ts
+        │
+        ▼
+provider registry  ("challonge")    lib/integrations/tournament/registry.ts
+        │
+        ├── ChallongeProvider       providers/challonge.ts   ← implemented (v1)
+        └── FutureProvider          ← not built, and nothing outside the folder changes
+```
+
+### Design rules
+
+- **The rest of FOM never imports a provider.** Feature/server code imports
+  `@/lib/integrations/tournament` (the service) and receives FOM-neutral objects. Nothing
+  outside `providers/` may contain `challonge`, `scores_csv`, `player1_id`,
+  `tournament_type`, `awaiting_review` or `api_key`.
+- **Challonge is the source of truth for tournament state** — bracket structure, match
+  progression, match state, scores and advancement. **FOM is the source of truth for users,
+  profiles, competition registration, permissions and FOM metadata.** Only the identifiers
+  needed to connect the two systems are stored in Supabase (no mirrored match/bracket tables).
+- **Provider ids are strings.** FOM never assumes a provider uses numeric ids.
+- **A failed provider call is never a successful FOM operation.** Every failure surfaces as a
+  typed `TournamentProviderError` and a discriminated `{ ok: false, error, status }` result.
+- **The API key never leaves the server**, is never logged, and is never included in an error
+  message (provider error text is scrubbed of `api_key=...` as defence-in-depth).
+
+### Provider contract
+
+`lib/integrations/tournament/types.ts` — FOM's needs, not Challonge's API:
+
+| Operation | Purpose |
+|---|---|
+| `supportsFormat(format)` | Whether this adapter can actually **create** that format (its own capability declaration — the UI and the service trust it instead of assuming) |
+| `createTournament({ name, slug, config })` | Create the tournament on the provider, from FOM's neutral configuration (`{ format }`) |
+| `getTournament(idOrSlug)` | Read state (`created` / `started` / `completed` / `unknown`); returns `null` only for a definitive "not found" |
+| `addParticipants(id, [{ ref, displayName }])` | Add FOM participants, returning the provider id correlated by FOM's own `ref` |
+| `getParticipants(id)` | List provider participants (reconciliation aid) |
+| `startTournament(id)` | Start and generate the bracket |
+| `getMatches(id)` | Read the bracket as FOM-neutral `TournamentMatch[]` |
+| `reportMatchResult(id, { matchId, participant1Score, participant2Score, winnerParticipantId? })` | Submit a result in the provider's own match/participant ids (the service translates FOM's ids/reference into these before calling — see TOURN-003); advancement is the provider's job |
+| `finalizeTournament(id)` | Finalize after the last result (idempotent) |
+| `getWinner(id)` | Champion of a *completed* tournament (never a semi-finalist) |
+
+FOM-neutral types: `Tournament`, `TournamentFormat`, `TournamentConfig` (`{ format }`),
+`TournamentState`, `TournamentParticipant`, `ProviderParticipantView`, `TournamentMatch`
+(`matchId`, `round`, `participant1Id`, `participant2Id`, `state`, `score`, `winnerParticipantId`),
+`TournamentMatchState` (`pending` / `ready` / `completed` / `unknown`), `TournamentWinner`.
+An unrecognised provider state maps to `unknown` — FOM refuses to *act* on it rather than
+guessing.
+
+Challonge v1 translation lives entirely in `providers/challonge.ts`:
+
+| Challonge | FOM |
+|---|---|
+| `player1_id` / `player2_id` / `winner_id` (numbers) | `participant1Id` / `participant2Id` / `winnerParticipantId` (strings) |
+| `scores_csv` (`"3-1"`, `"3-1,2-2"`) | `score: { participant1Score, participant2Score }` (first leg) |
+| `state: pending / open / complete` | `state: pending / ready / completed` |
+| `state: pending / underway / awaiting_review / complete` | `state: created / started / started / completed` |
+| `tournament_type: "single elimination"` | `format: "single_elimination"` (creatable) |
+| `tournament_type: "double elimination" / "round robin" / "swiss"` | `format: "double_elimination" / "round_robin" / "swiss"` (translate-only, see below) |
+
+### Tournament formats and configuration (TOURN-002A)
+
+The tournament format is a **FOM concept**, chosen by the organiser and stored by FOM; the
+adapter decides how it is represented on the provider's side.
+
+- **Modelled formats** (`TOURNAMENT_FORMATS`): `single_elimination`, `double_elimination`,
+  `round_robin`, `swiss`, `group_stage_knockout` — the vocabulary FOM can represent.
+  `DEFAULT_TOURNAMENT_FORMAT` is `single_elimination` (also what a competition with no
+  recorded format is read as, which is what keeps pre-TOURN-002A tournaments working).
+- **Creatable formats**: decided per adapter by `supportsFormat()`, derived from the same map
+  the adapter uses to build its creation request (`CHALLONGE_TOURNAMENT_TYPES`), so the
+  advertised capability and the wire mapping can never drift. The current Challonge adapter
+  advertises **`single_elimination` only** (`CHALLONGE_SUPPORTED_FORMATS`).
+- **Modelled ≠ creatable.** `round_robin`, `swiss`, `double_elimination` and
+  `group_stage_knockout` are represented so they can be read and reported, but requesting one
+  returns `400` — it is **never** substituted with a supported format. The UI shows them
+  disabled as “Coming soon”.
+- **Reading is not creating.** The adapter translates the provider `tournament_type` values FOM
+  models (so a tournament FOM could not create is still described honestly instead of being
+  reported as single elimination); anything else is an invalid provider response, never a guess.
+- **Persistence:** `competition_events.tournament_format` (migration `0024`) — FOM's own value,
+  written in the same conditional UPDATE as the provider mapping, constrained to the modelled
+  formats, and NULL for a competition with no tournament. No provider request/response shape is
+  ever stored and no provider-specific table exists.
+- **Capability reporting:** `getEventTournamentFormatOptions(eventId, viewerProfileId)` returns
+  `[{ format, supported }]` for every modelled format, and the summary endpoint reports that list
+  on its `409 { code: "not_linked" }` response — the UI builds its format selector from it, so
+  nothing is hard-coded in the browser.
+
+### Challonge adapter (v1)
+
+`lib/integrations/tournament/providers/challonge.ts` is the **only** Challonge-aware module.
+It uses `fetch()` directly (no SDK dependency), authenticates with the server-only
+`CHALLONGE_API_KEY` **as the v1 `api_key` query parameter**, and never logs the key or a URL
+that contains it. Implemented against the behaviour verified live by the POC
+(`lib/integrations/challonge-poc/`, kept untouched as the evidence artefact):
+
+```
+POST /v1/tournaments.json                                  create
+GET  /v1/tournaments/{id}.json                             read (also by slug)
+POST /v1/tournaments/{id}/participants/bulk_add.json       add participants
+GET  /v1/tournaments/{id}/participants.json                list participants
+POST /v1/tournaments/{id}/start.json                       start
+GET  /v1/tournaments/{id}/matches.json                     read matches
+PUT  /v1/tournaments/{id}/matches/{match_id}.json          submit a result
+POST /v1/tournaments/{id}/finalize.json                    finalize
+```
+
+- Throttled (`429`) and server-error (`5xx`) responses are retried a bounded 2 times with
+  backoff, honouring `retry-after` (capped). Every other non-2xx becomes a typed error.
+- Error mapping: `401/403` → `provider_auth_failed`, `404` → `provider_not_found`,
+  `422`/other `4xx` → `provider_invalid_request` (with the provider's own message, truncated
+  and scrubbed), `5xx`/`429` → `provider_unavailable`, network failure →
+  `provider_request_failed`, unparseable body → `provider_response_invalid`.
+- A response that cannot be correlated (participant count/order mismatch, missing object) is
+  **rejected** instead of being mapped to a guessed value.
+- `finalize` is required to leave `awaiting_review` (the provider's `review_before_finalizing`
+  setting); on an unfinalizable bracket the provider answers `400` with an **empty body**, which
+  is surfaced as a clear "the bracket may still have unreported matches" error.
+- The tournament `url`/slug accepts letters, numbers and underscores only (hyphens are
+  rejected with `422`) — see the slug rules below.
+
+### Registry (how a second provider would be added)
+
+`registry.ts` is a deliberately tiny factory — no DI container, plugin loader, dynamic import
+or configuration framework:
+
+```ts
+resolveTournamentProvider("challonge") // → ChallongeProvider
+resolveTournamentProvider("nope")      // → throws provider_unknown
+getDefaultTournamentProvider()         // → Challonge (default)
+```
+
+Resolution does **not** require credentials: the key is read lazily on the first actual call,
+so a missing key fails closed at call time (`provider_not_configured`, HTTP `503`) instead of
+silently degrading. Adding a provider means writing one adapter (including that adapter's own
+`supportsFormat` capability declaration) and adding one `case` — no migration (the `provider`
+column is free-form text) and no change to FOM.
+
+### FOM ↔ provider mapping
+
+| FOM | Stored | Provider |
+|---|---|---|
+| `competition_events` | `provider` (`"challonge"`) + `provider_tournament_id` + `tournament_format` | the tournament |
+| `competition_participants` | `provider_participant_id` | the bracket entry for that participant |
+| bracket / matches / scores / advancement | **not stored in FOM** | read live via `getEventTournamentBracket` / `getEventTournamentSummary` |
+
+- **Competition → tournament:** `createEventTournament(eventId, profileId, { config })` derives the
+  provider name from the competition, a deterministic slug from the competition id
+  (`fom_evt_<competition-id-hex>`) and a display name from the competition name, creates the
+  tournament in the requested (validated, provider-supported) format, and stores the two provider
+  columns **and the format** on the event in one conditional UPDATE.
+- **Participant → provider participant:** `addEventParticipantsToTournament(eventId, profileId)`
+  pushes every *unmapped* `competition_participants` row (identity from FOM, display name from
+  `profiles.full_name` with a positional fallback — never an email), then stores the returned
+  `provider_participant_id` on that row. Already-mapped participants are skipped, so the call is
+  safe to repeat. Participants are pushed in bounded batches of 64, and each batch's mapping is
+  saved immediately after the provider confirms it.
+- **Match → FOM match:** `getEventTournamentBracket(eventId, viewerProfileId)` returns
+  FOM-neutral matches **plus** the provider-participant → `competition_participants.id` map, so
+  no caller ever handles `player1_id` or `scores_csv`.
+
+### Service functions (server-side only)
+
+`lib/integrations/tournament/service.ts` — every function authorizes with the **existing**
+competition rule (`canManageEvent` = event creator or assigned ambassador; never
+`profiles.role`) and returns `CompetitionMutationResult<T>`
+(`{ ok: true, data }` / `{ ok: false, error, status }`):
+
+| Function | Does | Typical failures |
+|---|---|---|
+| `createEventTournament(eventId, profileId, { providerId?, config? })` | Creates the provider tournament in the requested format and stores the mapping **and** the format | `400` unsupported/uncreatable format, `403` not authorized, `404` competition, `409` already linked, `503` not configured, `502` provider |
+| `getEventTournamentFormatOptions(eventId, viewerProfileId)` | Every modelled format with the provider's own `supported` flag (the UI's capability source) | `403`, `404`, `502/503` provider |
+| `addEventParticipantsToTournament(eventId, profileId)` | Pushes unmapped participants + stores their provider ids | `409` not linked, `500` mapping not saved, `502` provider |
+| `startEventTournament(eventId, profileId)` | Starts the bracket (idempotent) | `404` missing, `409` completed/already finished/unrecognised state, `502` provider |
+| `getEventTournamentBracket(eventId, viewerProfileId)` | FOM-neutral bracket + participant map | `403`, `404`, `409` not linked, `502` provider |
+| `reportEventMatchResult(eventId, profileId, { matchRef, winnerParticipantId, participant1Score, participant2Score })` | TOURN-003. Translates FOM's match reference + `competition_participants.id` into the provider's ids and submits the result (**advancement is the provider's**); returns the updated match + the participant map | `400` malformed input / draw / winner not in the match, `404` match not in this tournament, `409` not linked/not started/already complete/match already settled/not ready, `502` provider |
+| `finalizeEventTournament(eventId, profileId)` | TOURN-003. Finalizes explicitly (idempotent) and returns the champion **resolved to a `competition_participants.id`** | `404`, `409` not started/unrecognised, `400` refused by the provider, `502` provider |
+| `getEventTournamentSummary(eventId, viewerProfileId)` | State, completeness, open matches, champion resolved to a FOM participant | `403`, `404`, `409`, `502` |
+
+Status mapping is provider-neutral: `provider_not_configured` → `503`,
+`provider_auth_failed` / `provider_unavailable` / `provider_request_failed` /
+`provider_response_invalid` → `502`, `provider_not_found` → `404`,
+`provider_invalid_request` / `tournament_invalid_input` → `400`. Reads and writes
+skip the bracket query entirely for a tournament that has not started, and a champion is
+only resolved for a **completed** tournament.
+
+**No HTTP routes or UI are part of TOURN-001** — it is server-side callable only, so the
+tournament API surface and UI were designed together in **TOURN-002** around these real
+workflows (next subsection).
+
+### Tournament management API + panel (TOURN-002)
+
+The first usable workflow on top of the service above: **create/link → sync participants → start →
+read-only bracket**, exposed as thin App Router routes plus a panel on the existing competition
+page. No new service layer and every operation calls exactly one service function;
+**TOURN-002A** adds the organiser's format choice (migration `0024` + the small
+`getEventTournamentFormatOptions` capability read it reports).
+
+| Route | Method | Service call | Success | Failures |
+|---|---|---|---|---|
+| `/api/competitions/[id]/tournament` | POST | `createEventTournament` | `201 { tournament }` | `400` (malformed/unsupported format) + `403/404/409/500/502/503` |
+| `/api/competitions/[id]/tournament` | GET | `getEventTournamentSummary` | `200 { tournament }` (incl. `format`) | `409 { code: "not_linked", formats }` state + `400/403/404/500/502/503` |
+| `/api/competitions/[id]/tournament/participants` | POST | `addEventParticipantsToTournament` | `200 { synced, alreadyMapped, total }` | `400/403/404/409/500/502/503` |
+| `/api/competitions/[id]/tournament/start` | POST | `startEventTournament` | `200 { started, tournament }` | `400/403/404/409/500/502/503` |
+| `/api/competitions/[id]/tournament/matches` | GET | `getEventTournamentBracket` | `200 { tournamentState, participants, matches }` | `409 { code: "not_linked" }` + `400/403/404/500/502/503` |
+| `/api/competitions/[id]/tournament/matches/[matchId]/result` | POST | `reportEventMatchResult` | `200 { match }` (FOM-neutral, its sides/winner resolved to participants) | `400/403/404/409/500/502/503` |
+| `/api/competitions/[id]/tournament/finalize` | POST | `finalizeEventTournament` | `200 { finalized, winnerParticipantId, tournament }` | `400/403/404/409/500/502/503` |
+
+- The handlers live in `lib/tournament-api.ts` (route files are thin wrappers, matching
+  `lib/competition-api.ts` / `lib/competition-drawing-api.ts`): authenticate from the NextAuth
+  session, delegate to one service function, and pass the service's own HTTP status through.
+  **The create request's body is read for exactly one value — the format** (TOURN-002A): it is
+  validated against FOM's modelled formats (`400` otherwise) and re-validated by the service. The
+  provider, slug, tournament name, participants and bracket stay server-side, so the browser can
+  neither influence nor discover which engine is used.
+- **Provider-neutral payloads.** Before a response leaves `lib/tournament-api.ts`, the provider
+  tournament id, provider participant ids, provider match ids and the provider `link` object are
+  dropped. Each match side and winner becomes `{ participantId: <competition_participants.id>,
+  name }`; a side that exists on the provider but is not mapped to a FOM participant is reported
+  as `Unknown participant` rather than by its provider id.
+- **Panel states** (`app/competitions/[id]/TournamentPanel.tsx`): *not linked* → **Tournament
+  Format** selector + **Create Tournament** (the selector is built from the server's capability
+  list: only formats the provider can create are selectable, the others appear as
+  `… — Coming soon` and are disabled, Create is disabled when nothing is selectable, and a
+  manipulated selector cannot make an unavailable format the selection);
+  *linked, nothing synced* → the recorded format (`Format: Single Elimination`) + **Sync
+  Participants**; *N participants synced* → **Start Tournament** plus **Sync Participants** (kept
+  available so players registered after the first sync can be added — the sync is idempotent);
+  *started* → the bracket, an inline **result form** on every playable match and **Finalize
+  Tournament**; *completed* → the bracket, every result and the winner (the TOURN-003 states are
+  described in the next subsection). The bracket is grouped by the rounds the provider reports
+  (never a fixed round count or fixed round names).
+  Loading, empty-bracket, unauthorized (`401/403`, no controls rendered) and provider-error
+  (`404/5xx` + Retry) states each have their own view. Starting asks for confirmation.
+- **Authorization is the TOURN-001 rule unchanged** (`canManageEvent` = creator **or** assigned
+  ambassador). The panel is only reachable from the role-aware competition page, and every API call
+  re-checks server-side; `profiles.role` and `MULTI_TEAM_ADMIN_USER_ID` are never consulted.
+- **Deliberately not part of TOURN-002** (later tickets): result reporting, finalization,
+  participant removal, a dedicated bracket visualization, polling/webhooks, notifications, and any
+  match/round/standings table. (Result reporting and finalization are delivered by TOURN-003; the
+  rest remain future work.)
+
+### Match result reporting, advancement and finalization (TOURN-003)
+
+The competition manager can now **report a result → the provider advances the winner → FOM re-reads
+the bracket → FOM finalizes explicitly → FOM shows the champion**, without FOM ever knowing how a
+bracket works.
+
+- **FOM's own match reference.** The bracket reports a `matchRef` per match —
+  `r{round}:{participant1Id}:{participant2Id}`, built by `toMatchReference`
+  (`lib/integrations/tournament/contract.ts`) from the round the provider reported and the two
+  `competition_participants.id` values the provider's sides resolved to. It is an **identifier, not
+  bracket logic** (nothing is ever derived from it), it is opaque to the client, and it contains no
+  provider id. It is `null` — and no result form is offered — while a side is undecided or is not
+  mapped to a competition participant.
+- **The translation boundary is the service.** `reportEventMatchResult` resolves the reference back
+  to the provider's match (by recomposing the same reference from the provider's matches + the
+  existing `competition_participants.provider_participant_id` mapping), translates the winning FOM
+  participant id into the provider's id, and only then calls
+  `TournamentProvider.reportMatchResult` (which still speaks the provider's own ids/format, with
+  `scores_csv`/`winner_id` living exclusively in the adapter). The browser never sends or receives a
+  provider id.
+- **Server-side validation before anything is called:** the reference must be well formed, the
+  scores must be whole and non-negative, a **draw is rejected** (FOM has no tie-break rule), a
+  winner is required, the tournament must be linked and `started`, the match must belong to this
+  tournament, must not already be settled (the current provider contract has no correction) and must
+  be `ready`, and the selected winner must actually be one of the two sides.
+- **Zero local advancement.** There is no code that computes a next round, a bracket position, a
+  seed or a winner path — the service submits the result and returns what the provider reports; the
+  panel then re-reads `GET …/matches`, so the newly populated next-round slot is whatever the engine
+  decided.
+- **Explicit finalization.** Finalization is a separate, deliberate action
+  (`POST …/tournament/finalize`, body ignored): the provider's engine may keep a fully-played
+  tournament awaiting review. Whether the tournament *may* be finalized is the provider's verdict —
+  FOM does not count matches or reimplement an "all matches complete" rule, and a refusal is
+  surfaced as a provider-neutral error. An already-complete tournament is handled idempotently
+  (`finalized: false`).
+- **The champion comes from the provider** (`getWinner()`, only for a completed tournament) and is
+  resolved back to a `competition_participants.id`, so the panel shows `Winner: <player name>` from
+  normal FOM participant data. The Finalize button disappears once the tournament is complete.
+- **UI states.** A playable match shows the score inputs, a required winner choice and **Report
+  Result**; a completed match shows its score and `Winner: <name>` and offers nothing; a TBD match
+  (or one with an unmapped side) offers nothing. After a successful report the panel refreshes the
+  summary and the bracket (no polling, no webhooks, no realtime sync). Provider errors are shown in
+  FOM terms only (e.g. *"This match is not ready for a result yet"*, *"The selected winner is not a
+  participant in this match"*, *"This match already has a result"*).
+- **No database migration.** FOM still stores only identifiers/mappings: match state, scores,
+  advancement, completion and the winner stay on the provider.
+
+### Duplicate-creation protection (idempotency)
+
+Creating a tournament is an external side effect that cannot be rolled back by a database
+transaction. The minimum practical protection is implemented instead of a distributed
+transaction:
+
+1. **Pre-check** — a competition that already has `provider_tournament_id` is rejected with
+   `409` before any provider call.
+2. **Deterministic slug** — the slug is derived from the competition id
+   (`fom_evt_<hex>`, letters/numbers/underscores only), so a retry after "created but crashed
+   before saving" produces the *same* slug. The provider rejects duplicate slugs, so the
+   service recognises the earlier creation and **adopts** the existing tournament
+   (it re-reads it by slug) instead of creating a second one. This also resolves two
+   concurrent create requests: both end up linked to the same tournament.
+3. **Conditional write** — the mapping is written with `UPDATE ... WHERE
+   provider_tournament_id IS NULL`; if 0 rows change, the service re-reads the row and
+   succeeds only when it points at the *same* tournament (otherwise `409`).
+
+`UNIQUE(provider, provider_tournament_id)` (and, per event,
+`UNIQUE(event_id, provider_participant_id)`) enforce the same guarantees at the database level.
+`startEventTournament` and `finalizeEventTournament` are idempotent.
+
+**Limitation (not solved, by design):** if the external tournament is deleted on the provider
+between attempts, a new one is created; if the provider confirms participants but the mapping
+write fails, the call fails with `500` and the affected participant ids are logged for
+reconciliation (`getParticipants` on the provider is the reconciliation tool). FOM never deletes
+external tournaments, and there is no compensating transaction.
+
+### Configuration
+
+| Variable | Scope | Notes |
+|---|---|---|
+| `CHALLONGE_API_KEY` | server-only | Authenticates Challonge v1 for the POC **and** the production adapter. Never `NEXT_PUBLIC_`, never logged, never in an error message. Missing → `provider_not_configured` (`503`), no API call attempted. |
+
+No provider-selection variable exists: a competition stores its own `provider` value, so
+multiple providers can coexist per competition without any global switch.
+
+### Known limitations
+
+- **API v1 only.** The adapter targets Challonge **v1** (the version the POC authenticated
+  against). The v2.1 probe in the POC is not used and no dual-version support exists; a v2
+  migration is a deliberate future change.
+- **No webhooks or polling.** Match state is read on demand. There is no background sync, so
+  FOM cannot react to changes made directly in the Challonge UI, and there is no automatic
+  completion trigger after the final result — the competition manager finalizes explicitly from the
+  panel (TOURN-003), which then re-reads the bracket.
+- **No participant removal.** The contract deliberately omits removal: the v1
+  `DELETE /participants/{id}.json` endpoint was **not** verified by the POC and is not invented
+  here. Removing a participant from a bracket is a follow-up.
+- **Rate limits.** ~30 calls per tournament creation flow. A bounded retry with backoff covers
+  `429`s, but a large roster sync (batches of 64) or a burst of result submissions could be
+  throttled; there is no global rate limiter or queue.
+- **No bracket tables in FOM.** Standings/advancement are only ever read live from the
+  provider, so FOM cannot query its own tournament history offline. This is intentional:
+  mirroring the engine would create two sources of truth.
+- **Only single elimination can be CREATED today.** FOM models `single_elimination`,
+  `double_elimination`, `round_robin`, `swiss` and `group_stage_knockout` (so they can be
+  represented, read and reported), but the current Challonge adapter can only create
+  `single_elimination` and advertises exactly that. Any other format is refused with `400` — it is
+  never silently converted into a supported one, and the UI offers it disabled as “Coming soon”.
+  A provider `tournament_type` FOM has no value for is still reported as an invalid provider
+  response rather than guessed.
+- **Format drift is not detected.** The format recorded by FOM is what the UI displays; if the
+  bracket were changed on the provider's side afterwards, FOM would not notice (the provider stays
+  the source of truth for the bracket, but there is no reconciliation of the two).
+- **Known draw limitation.** A level score is rejected (`400`) at the API, in the service and in the
+  adapter: FOM tournaments do not model draws, and submitting one would leave the provider's bracket
+  stuck. No tie-break rule is invented.
+- **No result correction.** A match the provider already reports as settled cannot be re-reported
+  (`409`) — the current provider contract has no notion of correcting a settled result, so that is a
+  later ticket rather than something FOM guesses at.
+- **A match with an unmapped side cannot be reported.** FOM addresses a match by its two
+  competition participants, so a bracket side that is not mapped to `competition_participants.id`
+  has no `matchRef` and is read-only (shown as `Unknown participant`). The supported flow syncs every
+  registered participant before starting, so this only occurs if a bracket is edited directly on the
+  provider.
+- **Multi-leg scores.** Only the first leg of a provider `scores_csv` is mapped; FOM submits a
+  single leg.
+- **Unrecognised provider states are refused.** If Challonge introduces a state FOM does not
+  model, `start`/`finalize` refuse to act (`409`) rather than guessing.
+
+### What is deliberately NOT built (separate later tickets)
+
+Participant removal from a bracket, result **correction**, a dedicated bracket
+dashboard/visualization, public tournament pages, standings UI, registration/QR changes, webhooks,
+polling workers, realtime provider synchronization, notifications, email, payments,
+group-stage/Swiss/double-elimination **mechanics** (TOURN-002A models and reports those formats, but
+only `single_elimination` can be created), and any provider-specific tables for matches/rounds/
+standings. TOURN-002 adds **no** new tournament abstraction, no provider import outside `providers/`,
+and no duplicated provider state; TOURN-002A adds one FOM-owned configuration value
+(`tournament_format`) and one capability read; TOURN-003 adds result reporting + explicit
+finalization **on top of** the existing provider contract — it replaces neither abstraction and
+implements **no** bracket engine, no advancement logic and no new table.
+
+### Manual live check against Challonge
+
+The unit tests mock the network. To exercise the **production adapter** against the real API,
+an opt-in, clearly separated check exists (it never touches Supabase or FOM data):
+
+```bash
+# Read-only: verifies authentication, and reads a real tournament when you point at one.
+# An unknown id is fine — a 404 must map to null, not an error.
+TOURNAMENT_LIVE_TEST=1 \
+CHALLONGE_LIVE_TOURNAMENT_ID=<tournament-id-or-slug> \
+node --env-file=.env.local node_modules/vitest/vitest.mjs run \
+  lib/integrations/tournament/providers/challonge.live.test.ts
+
+# Full adapter flow: creates a real PRIVATE tournament, adds participants, starts it,
+# reports results and finalizes it. Nothing is deleted afterwards; FOM data is untouched.
+TOURNAMENT_LIVE_TEST=1 TOURNAMENT_LIVE_CREATE=1 \
+CHALLONGE_LIVE_PARTICIPANTS="FOM Live One,FOM Live Two" \
+node --env-file=.env.local node_modules/vitest/vitest.mjs run \
+  lib/integrations/tournament/providers/challonge.live.test.ts
+```
+
+The end-to-end workflow (create → 16 participants → start → results → advancement → finalize →
+winner) remains verified by the isolated POC:
+`node lib/integrations/challonge-poc/run-poc.ts` (see its
+[README](lib/integrations/challonge-poc/README.md)).
 
 ---
 
@@ -1043,6 +1485,7 @@ BREVO_API_KEY=            # secret — server only, never NEXT_PUBLIC_
 BREVO_FROM_EMAIL=notifications@fom-sports.com
 BREVO_FROM_NAME=FOM Sports
 EMAIL_DELIVERY_SECRET=    # secret — server only; guards the EMAIL-002 processor endpoint
+CHALLONGE_API_KEY=        # secret — server only; Challonge v1 (TOURN-001 adapter + isolated POC)
 ```
 
 - `BREVO_API_KEY` is **secret and server-only** (guarded by `server-only`; there is
@@ -1197,6 +1640,7 @@ Team reviews application → PATCH /api/applications/[id] { status: "accepted" }
 | `BREVO_API_KEY` | `lib/email/config.ts`, `lib/email/providers/brevo.ts` | **Secret** — server only (EMAIL-001). Authenticates the Brevo v3 transactional email API. Never `NEXT_PUBLIC_`, never logged. |
 | `BREVO_FROM_EMAIL` | `lib/email/config.ts` | Verified Brevo sender address (e.g. `notifications@fom-sports.com`). Fails safely when unset. |
 | `BREVO_FROM_NAME` | `lib/email/config.ts` | Sender display name (e.g. `FOM Sports`). Fails safely when unset. |
+| `CHALLONGE_API_KEY` | `lib/integrations/tournament/config.ts`, `lib/integrations/challonge-poc/run-poc.ts` | **Secret** — server only. Authenticates the Challonge v1 Tournament API for the production TOURN-001 tournament integration and for the isolated POC. Never `NEXT_PUBLIC_`, never logged, never included in an error message. When unset the tournament service fails closed (`provider_not_configured` → `503`) without attempting an API call. See [Tournament Provider Integration](#tournament-provider-integration-tourn-001). |
 | `EMAIL_TEST_RECIPIENT` | `app/api/debug/email-test/route.ts` | Optional. Default recipient for the **development-only** email smoke test when `?to=` is omitted. |
 
 ---
@@ -1223,6 +1667,17 @@ Team reviews application → PATCH /api/applications/[id] { status: "accepted" }
 | `lib/competition-drawing-migration.test.ts` | COMP-006 migration (0020): table/RPC/unique-index/RLS shape, server-side random selection, one-drawing-per-event, immutability, no edits to prior migrations |
 | `lib/competition-public-server.test.ts` | COMP-007 public results: no-auth access, qualified-only participants, persisted winner (and no winner before drawing), player-profile linking (and safe non-linking), public-safe field projection and privacy |
 | `lib/competition-creation-auth.test.ts` | COMP-007 creation restriction: `isCompetitionCreationAdmin` (admin/ambassador/player/missing env), `createCompetitionEvent` allows only the admin and fails closed |
+| `lib/integrations/tournament/contract.test.ts` | TOURN-001/002A/003 pure contract: modelled formats, default format, completion, match-score validation, participant display-name fallback, `toTournamentConfig` narrowing (default / valid / rejected — never converted), and TOURN-003 match references (composition from the provider's round + FOM participant ids, `null` for an undecided/unmapped side, and narrowing that rejects provider-shaped ids) |
+| `lib/integrations/tournament/slug.test.ts` | TOURN-001 slug/name derivation: deterministic per competition, provider-safe charset (no hyphens, no separators), length bounds, blank-name fallback, unusable id rejected |
+| `lib/integrations/tournament/registry.test.ts` | TOURN-001 provider selection: `"challonge"` resolves a full contract implementation, casing/whitespace normalisation, default provider, unknown id rejected, resolution requires no credentials |
+| `lib/integrations/tournament/providers/challonge.test.ts` | TOURN-001/002A Challonge v1 adapter (mocked fetch): `api_key` query auth, create/participant/start/match/result/finalize/winner wire format, FOM-neutral translation, 401/404/422/429/5xx/network/malformed mapping, bounded retries, uncorrelated responses refused, no key leakage, and the TOURN-002A capability: only `single_elimination` is advertised/creatable (an unsupported format makes **no** request and is never substituted); other provider type names translate without inventing a supported format |
+| `lib/integrations/tournament/providers/challonge.live.test.ts` | TOURN-001 opt-in LIVE check (skipped unless `TOURNAMENT_LIVE_TEST=1`): real authentication, 404→`null`, FOM-neutral reads, and with `TOURNAMENT_LIVE_CREATE=1` a real create→participants→start→results→finalize flow |
+| `lib/integrations/tournament/service.test.ts` | TOURN-001/002A/003 service: `canManageEvent` authorization, mapping **and format** persistence, deterministic-slug adoption, concurrent-link handling, participant mapping + partial-failure honesty, idempotent start/finalize, champion resolution, `400/403/404/409/502/503` mapping, format validation (unmodellable → `400` before provider resolution; modelled-but-unsupported → `400` with **no** provider call), capability-driven creation (a provider that supports another format is honoured), the recorded format read back for existing/pre-TOURN-002A rows, and TOURN-003 result reporting (FOM reference → provider match/participant translation, no bracket write by FOM, guards for not-linked/not-started/completed/unknown, match not in this tournament, winner not in the match or not a FOM id, already-settled and not-ready matches, draw rejected, provider failure mapped honestly) plus finalization (champion resolved to a FOM participant, unmapped champion reported as `null`, idempotency, refusals) |
+| `lib/tournament-provider-migration.test.ts` | TOURN-001 migration (0023): mapping columns, provider pair CHECK, unique indexes, and that no tournament-engine state is duplicated into Supabase |
+| `lib/tournament-format-migration.test.ts` | TOURN-002A migration (0024): `tournament_format` column, backfill of existing linked tournaments to `single_elimination`, format CHECK + provider-pairing CHECK (applied **after** the backfill), no column DEFAULT, and no provider table/field (`tournament_type`/`scores_csv`/`api_key`) |
+| `lib/tournament-api.test.ts` | TOURN-002/002A/003 tournament route handlers: `401` unauthenticated, `403` unauthorized manager, service invoked with the session-derived profile id, `400/404/409/500/502/503` mapping, create/sync/start/summary/matches payloads resolved to FOM participants, the `matchRef` on a reportable match, the format the client chose being forwarded (and an unmodellable/malformed format rejected with `400` **without** calling the service), the bodyless default, the capability list on the not-linked response, result reporting (malformed body / invalid reference / missing winner / invalid scores / draw → `400` with **no** service call, provider-specific body fields ignored, the neutral match returned) and finalization (`{ finalized, winnerParticipantId, tournament }`, idempotency, an unmapped champion as `null`, refusal surfaced), and that no provider identifier, provider match id or provider term can appear in a response |
+| `app/api/competitions/[id]/tournament/__tests__/route.test.ts` | TOURN-002/003 route wiring: each route file exposes only its intended methods and forwards the awaited `[id]` (and `[matchId]`) segment to the matching handler (`GET`/`POST` summary+create, `POST` participants/start/result/finalize, `GET` matches) |
+| `app/competitions/[id]/__tests__/TournamentPanel.test.tsx` | TOURN-002/002A/003 panel (jsdom): loading → not linked (format selector built from the server capability list, unsupported formats disabled and impossible to submit, nothing submittable when no format is supported, selected format submitted in the request body) → linked (recorded format displayed, no selector) → create → sync (counts, already-mapped feedback, failed sync) → start → bracket (rounds, sides, score, state, winner, `TBD`, empty state), completed champion, `403` hides every control, provider error + Retry, TOURN-003 result reporting (a form only for a playable match, none for a TBD, unmapped or settled match, winner is required, the score + winner submitted as FOM-neutral input, the bracket re-read afterwards so the provider-advanced round appears, a rejected result surfaced honestly) and finalization (offered only while running, the winner shown afterwards, the button disappearing, a refusal surfaced), and that no provider detail reaches the DOM |
 | `lib/email/config.test.ts` | EMAIL-001 config: resolves `BREVO_*`, fails safely on each missing variable, treats whitespace as missing, lists only variable NAMES (never values) |
 | `lib/email/providers/brevo.test.ts` | EMAIL-001 Brevo provider: payload (recipient/sender/subject/html/text), `api-key` header, mocked fetch success + message id, non-2xx, network failure, no key leakage |
 | `lib/email/email-service.test.ts` | EMAIL-001 service: recipient validation, provider delegation, recipient trimming, `server-only` boundary enforcement |
@@ -1296,6 +1751,8 @@ npm test          # Vitest
 - ✅ Email notification outbox (EMAIL-002 — durable `email_notification_deliveries` table keyed one-per-notification, RLS with no client access, concurrency-safe atomic claiming (`FOR UPDATE SKIP LOCKED`), bounded exponential-backoff retries, stale `sending` recovery, a small centralized email-enabled type allowlist, integration only through `createNotification()`, and a secret-protected server-only processor endpoint. No scheduler ships; invoke the endpoint externally. Detailed templates are deferred to EMAIL-003/EMAIL-004.)
 - ✅ Team contacts player email (EMAIL-003 — outreach-originated `message_received` notifications carry an explicit typed `data` payload (`kind: "outreach"`) that the outbox processor uses to build a dedicated "team contacted you" email with team name, opportunity title/role, optional player name and a `View Conversation` CTA to the existing conversation. Non-outreach `message_received` notifications keep the generic EMAIL-002 copy. Adds migration `0022_notification_data.sql` (nullable `notifications.data` JSONB).)
 - ✅ Immediate email delivery & retry reliability (EMAIL-002A — a fresh enqueue in `createNotification()` kicks the **existing** EMAIL-002 processor via Next.js `after()`, so the first send attempt happens immediately after the response without the marketplace request ever waiting on Brevo. Attempts are bounded to a **maximum of 5 total** (attempt 5 failure → `failed`; a 6th attempt is impossible — enforced in both the processor and the claim RPC), and Brevo failures never fail the underlying marketplace operation. No new scheduler, cron, polling loop, outbox or processor is introduced; immediate delivery is best-effort and without a recurring scheduler a future retry requires another invocation of the existing processing path.)
+- ✅ Tournament management workflow (TOURN-002 — the first usable tournament workflow on top of the TOURN-001 provider abstraction: create/link a competition's external tournament, sync the registered participants, start it, and view a **read-only, provider-neutral** bracket on the existing competition page (`/competitions/[id]`). Thin App Router routes under `app/api/competitions/[id]/tournament/**` delegate to the existing service; authorization stays the TOURN-001 `canManageEvent` creator-or-ambassador rule. No new tables, no mirrored bracket state, no provider import outside `providers/`.)
+- ✅ Tournament result reporting, advancement & finalization (TOURN-003 — an authorized competition manager reports a match result with **FOM-neutral input only** (`matchRef` + winning `competition_participants.id` + scores), the provider advances the winner, FOM re-reads the bracket through the existing `GET …/matches`, and the manager **explicitly finalizes** once the provider permits it so the champion is shown. Adds `POST /api/competitions/[id]/tournament/matches/[matchId]/result` and `POST /api/competitions/[id]/tournament/finalize` (thin routes over `reportEventMatchResult` / `finalizeEventTournament`), `toMatchReference` in `lib/integrations/tournament/contract.ts`, and the panel's result form + Finalize button. **Zero local bracket calculation / advancement logic** — the provider remains the source of truth for match state, progression and the winner; draws, re-reporting a settled match and reporting an unready/unmapped match are refused server-side; no provider id, match id or provider term reaches the browser, and **no migration was needed** because no match state is mirrored into Supabase.)
 
 ---
 
