@@ -30,7 +30,14 @@ export function PassQr({ eventId }: { eventId: string }) {
           throw new Error(data.error || "Failed to load QR code");
         }
         const token = data.token as string;
-        const verifyUrl = `${window.location.origin}/competitions/verify/${encodeURIComponent(token)}`;
+        // COMP-EMAIL-001: the server builds the exact verify URL used for the
+        // confirmation email's QR. Prefer it so the on-screen QR and the emailed
+        // QR encode the identical payload. Fall back to the local construction
+        // (same shape) if an older response omits it.
+        const verifyUrl =
+          typeof data.verifyUrl === "string" && data.verifyUrl.length > 0
+            ? (data.verifyUrl as string)
+            : `${window.location.origin}/competitions/verify/${encodeURIComponent(token)}`;
         const dataUrl = await QRCode.toDataURL(verifyUrl, {
           width: 220,
           margin: 1,
