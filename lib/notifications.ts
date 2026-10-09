@@ -10,7 +10,8 @@ export type NotificationType =
   | "application_received"
   | "application_status_changed"
   | "message_received"
-  | "player_joined_team";
+  | "player_joined_team"
+  | "competition_registration_confirmed";
 
 export interface CreateNotificationInput {
   userId: string;

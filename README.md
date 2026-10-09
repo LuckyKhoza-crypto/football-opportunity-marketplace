@@ -194,7 +194,7 @@ football-opportunity-marketplace/
 │   ├── colors.ts                 # Centralized color tokens
 │   └── utils.ts                  # shadcn cn() helper
 │
-├── supabase/migrations/          # 24 SQL migrations (see Database Schema)
+├── supabase/migrations/          # 25 SQL migrations (see Database Schema)
 ├── types/index.ts                # All shared TypeScript types + option constants
 ├── public/images/                # Static images
 ├── app_roadmap.md                # MVP-004 → MVP-022 tickets
@@ -249,7 +249,7 @@ All tables have RLS enabled. The application uses `supabaseAdmin` (service role)
 | `conversations` | Messaging thread per application/outreach | `application_id` (nullable, partial unique), `outreach_id` (nullable, partial unique), CHECK (at least one is set) |
 | `conversation_participants` | Exactly two per conversation | `conversation_id`, `user_id`, `last_read_at`, UNIQUE(`conversation_id`, `user_id`) |
 | `messages` | Chat messages | `conversation_id`, `sender_id`, `body` (1–5000 chars), permanent (no UPDATE/DELETE policies) |
-| `notifications` | In-app notifications | `user_id`, `type` (`application_received`/`application_status_changed`/`message_received`/`player_joined_team`), `title`, `body`, `link`, `source_id` (dedup), `read_at`, `data JSONB` (EMAIL-003/004 — non-sensitive typed presentation metadata, e.g. outreach context or application-status context) |
+| `notifications` | In-app notifications | `user_id`, `type` (`application_received`/`application_status_changed`/`message_received`/`player_joined_team`/`competition_registration_confirmed`), `title`, `body`, `link`, `source_id` (dedup), `read_at`, `data JSONB` (EMAIL-003/004 — non-sensitive typed presentation metadata, e.g. outreach context or application-status context) |
 | `outreach` | Team-initiated contact | `opportunity_id`, `team_profile_id`, `player_profile_id`, `initial_message`, `status` (`pending`/`accepted`/`declined`/`withdrawn`), UNIQUE(`opportunity_id`, `team_profile_id`, `player_profile_id`) |
 | `team_memberships` | Canonical "player is on team" | `team_profile_id`, `player_profile_id`, `position`, `role`, `status` (only `active`), UNIQUE index on `player_profile_id` (one-team-per-player MVP rule) |
 | `team_invites` | Reusable shared recruitment links | `team_profile_id`, `token_hash` (SHA-256, UNIQUE), `created_by`, `expires_at`, `revoked_at`. **No status column** — state is derived from timestamps. |
@@ -588,6 +588,7 @@ All API routes verify auth via `getServerSession(authOptions)` and use `supabase
 | `/api/competitions/[id]/participants/[participantId]/attempts` | GET | A participant's attempt history (creator **or** assigned ambassador). |
 | `/api/competitions/[id]/participants/[participantId]/attempts` | POST | Record one attempt. Body carries **only** `result_value`; attempt number, `passed`, ownership and limits are server-resolved. Creator **or** assigned ambassador. Duplicates → `409`. |
 | `/api/competitions/[id]/pass-token` | POST | Mint the authenticated participant's own opaque verification token (stores only the SHA-256 digest; returns the raw token once for the pass QR). |
+| `/api/competitions/verify-qr/[token]` | GET | **Public** hosted PNG of a participant's verification QR (COMP-EMAIL-001). Rendered server-side from the SAME opaque token as `/competitions/verify/[token]` (`buildCompetitionVerifyUrl`), so the emailed QR and the on-screen pass QR encode an **identical** payload. No auth (mail image proxies are anonymous); `Cache-Control: no-store`; the token is never logged or echoed. |
 | `/api/competitions/[id]/draw` | GET | COMP-006. Return the drawing result (winner name, eligible count, timestamp — never database ids) if one exists. Creator **or** assigned ambassador only; an unrelated user gets an opaque `404`. |
 | `/api/competitions/[id]/draw` | POST | COMP-006. **Start the drawing.** The request body is ignored — the winner is selected server-side by the `start_competition_drawing` RPC and the eligible count is calculated server-side. Creator **or** assigned ambassador. No qualified participants → `409`; a second drawing → `409`. |
 | `/api/competitions/[id]/tournament` | POST | TOURN-002. **Create/link the external tournament.** Body ignored (provider, format, slug, name resolved server-side). Creator **or** assigned ambassador. Already linked → `409`. Returns the tournament's neutral status (`201`). |
@@ -604,6 +605,7 @@ All API routes verify auth via `getServerSession(authOptions)` and use `supabase
 |---|---|---|
 | `/api/debug/players` | GET | Diagnostic endpoint for player_profiles queries (counts, discoverable filter, sample rows). |
 | `/api/debug/email-test` | GET/POST | **Development-only** transactional-email smoke test (EMAIL-001). Fails **closed** (`404`) in production. Sends a **fixed** subject/body (`FOM Sports email test` / `Your FOM Sports Brevo integration is working.`); the caller may only supply a recipient (`?to=` or JSON `{ to, name? }`). Returns the Brevo `messageId`. Never a production email relay. |
+| `/api/debug/registration-email` | GET/POST | **Development-only** registration-email rendering smoke test (COMP-EMAIL-001). Fails **closed** (`404`) in production. Sends the **real** confirmation template with the **hosted** QR image so Gmail rendering can be verified end-to-end; the caller may only supply a recipient (`?to=` or JSON `{ to, name? }`). The sample QR token verifies no real participant. Requires the app to be reachable at a **public** host (Gmail fetches the image through its own proxy). Never a production email relay. |
 | `/api/email/deliveries/process` | GET/POST | **Server-only** email outbox processor (EMAIL-002). Requires `Authorization: Bearer $EMAIL_DELIVERY_SECRET` (or `x-email-delivery-secret`). Fails **closed** (`404`) when the secret is unset or wrong. Drains `email_notification_deliveries` (atomic claim) and sends via Brevo. Returns aggregate counts only — never recipient addresses or provider state. |
 
 ---
@@ -1379,6 +1381,7 @@ marketplace event ─► createNotification() ─► notifications row (canonica
 | `lib/email/index.ts` | Barrel export (`@/lib/email`) |
 | `supabase/migrations/0021_email_notification_deliveries.sql` | EMAIL-002 delivery table, RLS (no client policies), indexes and the atomic claim / stale-recovery RPCs |
 | `supabase/migrations/0022_notification_data.sql` | EMAIL-003 adds a nullable `notifications.data` JSONB column (JSON-object CHECK) for non-sensitive typed presentation metadata — RLS/indexes/realtime untouched |
+| `supabase/migrations/0025_competition_registration_notification.sql` | COMP-EMAIL-001 widens the `notifications.type` CHECK to allow `competition_registration_confirmed` and adds its per-participant dedup partial unique index. The type is deliberately **not** email-enabled (the confirmation email's QR is built in memory; see below). No token/QR/email payload is persisted. |
 
 ### Scope (EMAIL-001 / EMAIL-002)
 
@@ -1478,12 +1481,93 @@ payload, and the outbox processor builds a dedicated **application-status** emai
   Brevo failures are swallowed by `createNotification()`, and the route already wraps
   notification creation in a guard, so the application update always succeeds.
 
+### Competition registration confirmation email (COMP-EMAIL-001)
+
+When a participant registers for a competition (via a join link) the confirmation
+email contains their **actual registration pass QR** and their verification code.
+
+- **Trigger / single mint:** the pass QR is minted exactly **once**, by the existing
+  `POST /api/competitions/[id]/pass-token` flow (`mintParticipantVerificationToken`),
+  when the registration success screen (`/competitions/join/[token]/pass`) renders.
+  `mintPassTokenHandler` (`lib/competition-attempt-api.ts`) builds the verify URL from
+  the **request origin** with the new pure helper
+  `buildCompetitionVerifyUrl()` (`lib/competition-join.ts`), returns it as
+  `{ token, verifyUrl }`, and passes that **exact same string** to the email path. The
+  email path **never mints a second token** and never overwrites the stored token.
+- **On-screen = emailed payload:** `PassQr.tsx` renders the QR from the server-returned
+  `verifyUrl` (falling back to the same construction only if absent), so the QR shown on
+  screen and the QR in the email encode the **identical** URL. Regression tests assert
+  this equality end to end (`lib/competition-registration-notify.test.ts`,
+  `lib/competition-attempt-api.test.ts`).
+- **QR image (server-side, hosted):** the QR must **not** be embedded as an inline
+  `data:` URI — Gmail ignores base64 `data:` images (confirmed against a real delivered
+  message: the body carried a complete, valid `data:image/png;base64,…` yet the QR was
+  invisible). Brevo cannot do Content-ID inline attachments either (its v3 API never sets
+  a `Content-ID` MIME header), so the QR is served as a **hosted PNG**: the `qrcode`
+  dependency renders the payload to PNG bytes in Node
+  (`lib/email/qr.ts#renderVerificationQrPng`), a **public** app route serves it
+  (`GET /api/competitions/verify-qr/[token]`), and the email references it with a plain
+  `<img src="https://…/api/competitions/verify-qr/<token>">`. The route re-renders from
+  the SAME opaque token as the pass (`buildCompetitionVerifyUrl`), so the emailed and
+  on-screen QR encode an **identical** payload.
+- **Public origin (required for the email):** the hosted image is fetched
+  **anonymously** by the recipient's mail image proxy (Gmail routes images through
+  `…googleusercontent.com/meips/…`), so the QR payload is built from a canonical **public**
+  origin — `NEXT_PUBLIC_APP_URL` (preferred) or `NEXTAUTH_URL`, falling back to the request
+  origin — via `resolvePublicAppOrigin` (`lib/competition-attempt-api.ts`). This keeps the
+  payload off `localhost`, internal hosts and auth-protected Vercel **preview** deployments,
+  which is the usual cause of a broken image plus a failed `meips` proxy request. The route
+  is unauthenticated, sends `Cache-Control: no-store` and never logs the token; the visible
+  verification code remains the fallback when a client blocks images.
+- **Email content:** competition name, event date/time (**labelled UTC** — there is no
+  event timezone field), `location`, organizer `description`, `challenge_name`, the
+  **exact verification code** (`ABCD-1234` formatting), the QR image, and check-in copy
+  (“present the QR code, or give staff your verification code”). Missing optional fields
+  are omitted — the schema has **no** venue/address/map/parking/“what to bring” fields, so
+  those are never fabricated. Sent via the existing EMAIL-001 Brevo service / FOM shell
+  (`lib/email/templates/competition-registration.ts`).
+- **Delivery & dedup:** the email is built **in memory** and sent best-effort after the
+  response via Next.js `after()` (`lib/competition-registration-notify.ts`). Duplicate
+  emails are prevented by reusing the notification dedup convention: a
+  `competition_registration_confirmed` notification keyed by
+  `source_id = competition_participants.id` (partial unique index, migration `0025`). The
+  **first** mint emails; later mints (page refreshes / retries) are deduplicated and send
+  nothing. The type is intentionally **not** in `EMAIL_ENABLED_NOTIFICATION_TYPES`, so the
+  durable outbox never rebuilds/sends a token-less duplicate.
+- **Failure isolation:** email-provider failures are logged safely (never the token or
+  code) and can never fail the pass-token response or the registration.
+- **Delivery guarantee (Option A):** the raw token / QR payload / rendered email are
+  **never persisted** (not in `notifications.data`, not in any column, not in logs).
+  Because the payload is not persisted, this path is **best-effort only — it does NOT get
+  durable outbox retries**. Deduplication prevents duplicates; it does **not** guarantee
+  successful delivery. See the follow-up below for a durable-retry design.
+
+#### Follow-up (not implemented): durable delivery (Option B)
+
+A future ticket could give this email durable outbox retries by extending the
+server-only `email_notification_deliveries` table with a payload column holding the
+**prebuilt** email (including the QR URL/image): the confirmation would be built once from
+the exact pass token, then the immutable payload enqueued for the existing processor to
+send and retry.
+
+- **Tradeoff:** durable retry and consistent resend behaviour **versus persisting a
+  sensitive verification token in the database** (today only its SHA-256 hash is stored).
+  A DB leak would expose a token that, combined with an event-operator session, could
+  verify that participant.
+- **Requirements before implementation:** appropriate access controls (the table already
+  has RLS with no client policies), retention limits, and safeguards so the payload can
+  never leak through logs, API responses, or `notifications.data`; evaluate encrypting the
+  sensitive payload at rest, or storing only the minimum necessary token/URL.
+- **This requires a new migration and a dedicated security review.** It is intentionally
+  **not** part of COMP-EMAIL-001.
+
 ### Environment variables
 
 ```env
 BREVO_API_KEY=            # secret — server only, never NEXT_PUBLIC_
 BREVO_FROM_EMAIL=notifications@fom-sports.com
 BREVO_FROM_NAME=FOM Sports
+NEXT_PUBLIC_APP_URL=      # canonical PUBLIC app URL (e.g. https://www.fom-sports.com) — used for participant QR links/emails
 EMAIL_DELIVERY_SECRET=    # secret — server only; guards the EMAIL-002 processor endpoint
 CHALLONGE_API_KEY=        # secret — server only; Challonge v1 (TOURN-001 adapter + isolated POC)
 ```
@@ -1635,6 +1719,7 @@ Team reviews application → PATCH /api/applications/[id] { status: "accepted" }
 | `GOOGLE_CLIENT_SECRET` | `lib/auth.ts` | Google OAuth |
 | `NEXTAUTH_SECRET` | `lib/auth.ts` | JWT signing |
 | `NEXTAUTH_URL` | NextAuth | Production URL |
+| `NEXT_PUBLIC_APP_URL` | `lib/competition-attempt-api.ts` | Canonical **public** app URL (e.g. `https://www.fom-sports.com`). Used to build participant QR payloads (on-screen pass + confirmation email) so the emailed **hosted** QR image is reachable by mail image proxies (Gmail `meips`). Falls back to `NEXTAUTH_URL`, then the request origin. Not a secret. |
 | `REALTIME_CHANNEL_SECRET` | `lib/realtime-broadcast.ts` | HMAC signing for realtime channels |
 | `MULTI_TEAM_ADMIN_USER_ID` | `lib/multi-team.ts`, `lib/competition-server.ts` | profiles.id of the multi-team admin (server-only). COMP-007 reuses it as the **only** user allowed to create competitions — server-only, never `NEXT_PUBLIC_`, fails closed when unset. |
 | `BREVO_API_KEY` | `lib/email/config.ts`, `lib/email/providers/brevo.ts` | **Secret** — server only (EMAIL-001). Authenticates the Brevo v3 transactional email API. Never `NEXT_PUBLIC_`, never logged. |
@@ -1690,6 +1775,10 @@ Team reviews application → PATCH /api/applications/[id] { status: "accepted" }
 | `lib/notification-data-migration.test.ts` | EMAIL-003 migration 0022: nullable `data` JSONB column, JSON-object CHECK, RLS/dedup/realtime untouched |
 | `lib/email/outreach-message.test.ts` | EMAIL-003 outreach template: team/opportunity/player copy, dedicated subject, `View Conversation` CTA, no internal ids as visible copy, graceful missing-data, HTML escaping |
 | `lib/email/templates/application-status.test.ts` | EMAIL-004 application-status template: status-specific subject/copy, team/opportunity/player copy, `View Application` CTA, no internal ids as visible copy, graceful missing-data, `rejected`→"declined" copy, HTML escaping |
+| `lib/email/templates/competition-registration.test.ts` | COMP-EMAIL-001 confirmation template: name/date(UTC)/location/challenge/code/QR image, check-in copy, optional-field omission, HTML escaping |
+| `lib/competition-registration-notify.test.ts` | COMP-EMAIL-001: emails the QR built from the EXACT pass verify URL (regression), sends once + dedupes on repeat, skips non-participants / missing email, provider failure never throws, `after()` scheduling |
+| `lib/email/qr.test.ts` | COMP-EMAIL-001 server-side QR: base64 PNG data URI, deterministic per payload, rejects empty payload |
+| `lib/competition-registration-notification-migration.test.ts` | COMP-EMAIL-001 migration 0025: type CHECK widened + dedup index, no token/QR/email persisted, competition tables/RLS/realtime/outbox untouched |
 | `lib/matching/*.test.ts` | Matching engine: engine, applications, mvp014, player-experience, team-applications |
 | `app/api/**/__tests__/` | API routes: applications (acceptance, withdrawal), messages, notifications, outreach, team invites, team join, competitions (create + event/ambassador handlers) |
 | `app/homepage.test.ts` | Homepage rendering |
@@ -1739,6 +1828,7 @@ npm test          # Vitest
 - ✅ Team memberships (canonical roster, one-team-per-player MVP rule)
 - ✅ Multi-team support (admin-gated)
 - ✅ Application status email notifications (EMAIL-004 — `application_status_changed` notifications carry an explicit typed `data` payload (`kind: "application_status_changed"`; canonical `status` enum plus team/opportunity/player copy) that the outbox processor uses to build a status-specific email via `lib/email/templates/application-status.ts` with a `View Application` CTA to the existing `/player/applications/<id>` route (`rejected` is phrased as "declined", matching the app UI). Reuses the existing EMAIL-002/002A outbox, `after()` immediate processing, retry/backoff and processor — no new migration, scheduler, outbox or template-dispatch system. Also adds the `position` field to the PATCH opportunity select so the email has correct position context.)
+- ✅ Competition registration confirmation email (COMP-EMAIL-001 — on registration the participant's pass QR is minted once by the existing pass-token flow; the confirmation email references a **hosted** PNG rendered from that **exact** payload (identical encoded URL) via `GET /api/competitions/verify-qr/[token]` — a `data:` URI is stripped by Gmail and Brevo does not support Content-ID (`cid:`) inline images — plus the verification code, event details and check-in copy, sent via the existing EMAIL-001 Brevo service. Duplicate emails are prevented by the existing notification dedup (`competition_registration_confirmed`, `source_id` = participant id, migration `0025`). The raw token/QR/email are never persisted, so this path is best-effort with no durable retry (durable Option B is documented as a future, security-reviewed follow-up).)
 - ✅ Homepage with personalized recommendations
 - ✅ Competitions foundation (COMP-001 — data model, types, authorization, server helpers)
 - ✅ Competitions management (COMP-002 — `/competitions` create/manage pages, event editing, controlled lifecycle, ambassador add/remove by email, basic statistics)
@@ -1800,6 +1890,11 @@ This section tells you **where to look** for common changes. Read the relevant s
 2. Add the type to `NotificationType` in `lib/notifications.ts` and `types/index.ts`.
 3. Add a dedup partial unique index if the notification should be unique per source.
 4. Call `createNotification(...)` from the relevant API route.
+5. Decide whether the type should email: add it to `EMAIL_ENABLED_NOTIFICATION_TYPES`
+   (`lib/email/notification-delivery.ts`) for a durable-outbox email, plus a `data.kind`
+   branch in `buildNotificationEmail()`. Types that must carry a value that cannot be
+   persisted (e.g. COMP-EMAIL-001's verification token) are deliberately **left out** of
+   the allowlist and sent best-effort from their own request instead.
 
 ### Adding a New Role or Capability
 

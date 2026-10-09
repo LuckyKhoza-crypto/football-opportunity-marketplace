@@ -167,6 +167,90 @@ export function buildCompetitionJoinUrl(origin: string, token: string): string {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Participant verification URL (pass QR payload)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Build the canonical public verification path for an opaque participant
+ * token. This is the ONLY payload encoded in the participant pass QR — it
+ * never contains a profile id, participant id, email or event id.
+ */
+export const COMPETITION_VERIFY_PATH_PREFIX = "/competitions/verify/";
+
+export function buildCompetitionVerifyPath(token: string): string {
+  return `${COMPETITION_VERIFY_PATH_PREFIX}${encodeURIComponent(token)}`;
+}
+
+/**
+ * Build the absolute verification URL (the pass QR payload) from an origin.
+ *
+ * This is the single source of truth for the payload shown on the participant
+ * pass. Server and client both derive the encoded string from here so the QR
+ * displayed on screen and any QR generated from the same token are identical.
+ */
+export function buildCompetitionVerifyUrl(origin: string, token: string): string {
+  const base = origin.replace(/\/+$/, "");
+  return `${base}${buildCompetitionVerifyPath(token)}`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Hosted verification-QR image (COMP-EMAIL-001)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Build the canonical path of the PUBLIC hosted PNG for a participant's
+ * verification QR. The image is rendered server-side
+ * (`app/api/competitions/verify-qr/[token]/route.ts`) from the SAME opaque token
+ * as `buildCompetitionVerifyPath`, so the emailed QR and the on-screen pass QR
+ * encode an identical payload.
+ *
+ * Only the opaque token is embedded — never a profile id, participant id, email
+ * or event id.
+ */
+export function buildCompetitionVerifyQrPath(token: string): string {
+  return `/api/competitions/verify-qr/${encodeURIComponent(token)}`;
+}
+
+/**
+ * Build the absolute hosted verification-QR image URL from an origin (e.g. the
+ * request origin).
+ *
+ * This URL is what the confirmation email references with a plain
+ * `<img src="https://…">`. It is used instead of a `data:` URI (which Gmail
+ * strips from HTML bodies) and instead of a Content-ID (`cid:`) inline
+ * attachment (which Brevo's transactional API does not support — it never sets a
+ * Content-ID header). The PNG itself is produced from the exact pass payload.
+ */
+export function buildCompetitionVerifyQrImageUrl(
+  origin: string,
+  token: string,
+): string {
+  const base = origin.replace(/\/+$/, "");
+  return `${base}${buildCompetitionVerifyQrPath(token)}`;
+}
+
+/**
+ * Derive the hosted QR image URL from the EXACT pass `verifyUrl`.
+ *
+ * The path is swapped from `/competitions/verify/<token>` to
+ * `/api/competitions/verify-qr/<token>` using the same origin, so the QR served
+ * for the email encodes the identical payload shown on the participant pass.
+ */
+export function buildCompetitionVerifyQrImageUrlFromVerifyUrl(
+  verifyUrl: string,
+): string {
+  const { origin, pathname } = new URL(verifyUrl);
+  if (!pathname.startsWith(COMPETITION_VERIFY_PATH_PREFIX)) {
+    throw new Error("A competition verification URL is required.");
+  }
+  const encodedToken = pathname.slice(COMPETITION_VERIFY_PATH_PREFIX.length);
+  if (!encodedToken || encodedToken.includes("/")) {
+    throw new Error("A verification URL with an opaque token is required.");
+  }
+  return buildCompetitionVerifyQrImageUrl(origin, decodeURIComponent(encodedToken));
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Participant verification token / pass identifier
 // ═══════════════════════════════════════════════════════════════
 

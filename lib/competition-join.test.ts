@@ -10,6 +10,11 @@ import {
   buildCompetitionJoinPath,
   buildCompetitionJoinLoginUrl,
   buildCompetitionJoinUrl,
+  buildCompetitionVerifyPath,
+  buildCompetitionVerifyUrl,
+  buildCompetitionVerifyQrPath,
+  buildCompetitionVerifyQrImageUrl,
+  buildCompetitionVerifyQrImageUrlFromVerifyUrl,
   generateVerificationCode,
   hashVerificationToken,
   formatVerificationCode,
@@ -170,6 +175,67 @@ describe("COMP-003: join URL builders", () => {
   it("embeds only the public token — never an id/email", () => {
     const url = buildCompetitionJoinUrl("https://example.com", "tok");
     expect(url).toContain("/competitions/join/tok");
+    expect(url).not.toContain("@");
+  });
+});
+
+describe("COMP-EMAIL-001: verification URL (pass QR payload)", () => {
+  it("builds the canonical verify path with an encoded token", () => {
+    expect(buildCompetitionVerifyPath("a/b+c")).toBe(
+      "/competitions/verify/a%2Fb%2Bc",
+    );
+  });
+
+  it("builds an absolute verify URL from an origin (no duplicate slash)", () => {
+    expect(buildCompetitionVerifyUrl("https://example.com/", "tok")).toBe(
+      "https://example.com/competitions/verify/tok",
+    );
+  });
+
+  it("embeds only the opaque token — never an id/email", () => {
+    const url = buildCompetitionVerifyUrl("https://example.com", "tok");
+    expect(url).toBe("https://example.com/competitions/verify/tok");
+    expect(url).not.toContain("@");
+  });
+});
+
+describe("COMP-EMAIL-001: hosted verification-QR image URL", () => {
+  it("builds the canonical hosted image path with an encoded token", () => {
+    expect(buildCompetitionVerifyQrPath("a/b+c")).toBe(
+      "/api/competitions/verify-qr/a%2Fb%2Bc",
+    );
+  });
+
+  it("builds an absolute hosted image URL from an origin (no duplicate slash)", () => {
+    expect(buildCompetitionVerifyQrImageUrl("https://example.com/", "tok")).toBe(
+      "https://example.com/api/competitions/verify-qr/tok",
+    );
+  });
+
+  it("derives the hosted image URL from the EXACT pass verify URL", () => {
+    const verifyUrl = "https://fom-sports.com/competitions/verify/opaque-token-123";
+    expect(buildCompetitionVerifyQrImageUrlFromVerifyUrl(verifyUrl)).toBe(
+      "https://fom-sports.com/api/competitions/verify-qr/opaque-token-123",
+    );
+  });
+
+  it("uses the same origin as the verify URL (no cross-host swap)", () => {
+    const verifyUrl = "http://localhost:3000/competitions/verify/tok";
+    expect(buildCompetitionVerifyQrImageUrlFromVerifyUrl(verifyUrl)).toBe(
+      "http://localhost:3000/api/competitions/verify-qr/tok",
+    );
+  });
+
+  it("throws when the verify URL carries no token", () => {
+    expect(() =>
+      buildCompetitionVerifyQrImageUrlFromVerifyUrl(
+        "https://fom-sports.com/competitions/verify/",
+      ),
+    ).toThrow();
+  });
+
+  it("embeds only the opaque token — never an id/email", () => {
+    const url = buildCompetitionVerifyQrImageUrl("https://example.com", "tok");
     expect(url).not.toContain("@");
   });
 });

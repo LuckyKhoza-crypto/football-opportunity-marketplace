@@ -7,6 +7,7 @@ import {
   buildBrevoPayload,
   sendWithBrevo,
 } from "@/lib/email/providers/brevo";
+import { buildCompetitionRegistrationEmail } from "@/lib/email/templates/competition-registration";
 import {
   EmailConfigError,
   EmailProviderError,
@@ -85,6 +86,44 @@ describe("EMAIL-001: Brevo provider — payload construction", () => {
     const payload = buildBrevoPayload(withoutText);
     expect(payload.textContent).toBeUndefined();
     expect("textContent" in payload).toBe(false);
+  });
+});
+
+describe("COMP-EMAIL-001: Brevo payload carries the hosted QR image", () => {
+  const QR_IMAGE_URL =
+    "https://fom-sports.com/api/competitions/verify-qr/opaque-token-123";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setValidEnv();
+  });
+  afterEach(clearEnv);
+
+  it("sends htmlContent with a hosted QR URL — no data: URI, no cid: attachment", () => {
+    const email = buildCompetitionRegistrationEmail({
+      to: "player@example.com",
+      competitionName: "City Finals",
+      eventDate: "2026-10-03T18:30:00.000Z",
+      location: "Riverside",
+      description: "Bring water.",
+      challengeName: "Juggle Challenge",
+      verificationCode: "ABCD2345",
+      qrImageUrl: QR_IMAGE_URL,
+      participantName: "Alex",
+    });
+
+    const payload = buildBrevoPayload(email);
+
+    // The QR is referenced as a normal (hosted) https image — renders in Gmail.
+    expect(payload.htmlContent).toContain(`<img src="${QR_IMAGE_URL}"`);
+    expect(payload.htmlContent).not.toContain("data:image");
+    expect(payload.htmlContent).not.toContain("cid:");
+    // Brevo's transactional API does not support inline Content-ID images
+    // (it never sets a Content-ID header), so no attachment is used.
+    expect("attachment" in payload).toBe(false);
+    // The verification code stays visible as the fallback.
+    expect(payload.htmlContent).toContain("ABCD-2345");
+    expect(payload.textContent).toContain("ABCD-2345");
   });
 });
 

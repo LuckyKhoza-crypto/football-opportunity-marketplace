@@ -12,6 +12,7 @@ import {
   RefreshCw,
   MessageSquare,
   CheckCheck,
+  Trophy,
 } from "lucide-react";
 import { useNotifications } from "@/lib/use-notifications";
 import type { AppNotification, NotificationType } from "@/types";
@@ -45,6 +46,8 @@ function NotificationIcon({ type }: { type: NotificationType }) {
       return <RefreshCw className="h-5 w-5" />;
     case "message_received":
       return <MessageSquare className="h-5 w-5" />;
+    case "competition_registration_confirmed":
+      return <Trophy className="h-5 w-5" />;
     default:
       return <Bell className="h-5 w-5" />;
   }
@@ -58,6 +61,8 @@ function getIconColor(type: NotificationType): string {
       return "bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400";
     case "message_received":
       return "bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400";
+    case "competition_registration_confirmed":
+      return "bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400";
     default:
       return "bg-muted text-muted-foreground";
   }

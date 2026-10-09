@@ -10,6 +10,9 @@ import {
   verifyCompetitionParticipantByCode,
   verifyCompetitionParticipantByToken,
 } from "@/lib/competition-attempt-server";
+import { buildCompetitionVerifyUrl } from "@/lib/competition-join";
+import { resolvePublicAppOrigin } from "@/lib/competition-public-origin";
+import { scheduleCompetitionRegistrationConfirmation } from "@/lib/competition-registration-notify";
 
 /**
  * COMP-004 — Participant verification & challenge-attempt route handlers.
@@ -224,8 +227,14 @@ export async function recordAttemptHandler(
 
 // ── POST /api/competitions/[id]/pass-token ─────────────────────
 // Mint the authenticated participant's OWN opaque verification token (QR).
+//
+// COMP-EMAIL-001: this is the SINGLE mint of the participant's pass token. The
+// exact verification URL derived from it is (a) returned for the on-screen QR
+// and (b) reused for the confirmation email — so both encode the identical
+// payload. No second token is minted for the email, and the email is queued
+// best-effort after the token is minted (never overwriting it).
 export async function mintPassTokenHandler(
-  _request: Request,
+  request: Request,
   eventId: string,
 ): Promise<NextResponse> {
   try {
@@ -245,7 +254,27 @@ export async function mintPassTokenHandler(
       );
     }
 
-    return NextResponse.json({ token: result.data.token });
+    // Build the pass QR payload ONCE, from the canonical PUBLIC origin (never a
+    // client-supplied value) — the same construction the pass screen used. The
+    // configured public URL is preferred over the raw request origin so the
+    // emailed hosted QR image is fetchable by Gmail's image proxy even when the
+    // email was generated from a non-public (preview/localhost) request origin.
+    const origin = resolvePublicAppOrigin(new URL(request.url).origin);
+    const verifyUrl = buildCompetitionVerifyUrl(origin, result.data.token);
+
+    // COMP-EMAIL-001: best-effort confirmation email using the EXACT same URL.
+    // Never throws, never blocks the response, never mints another token.
+    try {
+      scheduleCompetitionRegistrationConfirmation({
+        eventId,
+        profileId,
+        verifyUrl,
+      });
+    } catch {
+      // Best-effort only — the pass response must always succeed.
+    }
+
+    return NextResponse.json({ token: result.data.token, verifyUrl });
   } catch (err) {
     console.error("Pass token mint error:", err);
     return NextResponse.json(
