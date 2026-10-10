@@ -4,8 +4,12 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { getCompetitionJoinByToken, getCompetitionPass } from "@/lib/competition-join-server";
+import { getCompetitionEvent } from "@/lib/competition-server";
 import { getParticipantChallengeState } from "@/lib/competition-attempt-server";
-import { formatVerificationCode } from "@/lib/competition-join";
+import {
+  formatVerificationCode,
+  getWithdrawalBlockReason,
+} from "@/lib/competition-join";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,8 +22,17 @@ import {
   COMPETITION_PARTICIPANT_STATUS_LABELS,
   type Profile,
 } from "@/types";
-import { Calendar, MapPin, ShieldCheck, Ticket, Repeat, Target } from "lucide-react";
+import {
+  Calendar,
+  MapPin,
+  ShieldCheck,
+  Ticket,
+  Repeat,
+  Target,
+  UserMinus,
+} from "lucide-react";
 import { PassQr } from "./PassQr";
+import { UnregisterCompetitionButton } from "@/components/competitions/UnregisterCompetitionButton";
 
 /**
  * COMP-003 / COMP-004 — Participant pre-entry pass.
@@ -58,10 +71,59 @@ export default async function CompetitionPassPage({
     redirect(`/competitions/join/${encodeURIComponent(token)}`);
   }
 
+  // T-REM-2: a removed registration is never presented as an active pass.
+  if (pass.removedAt) {
+    return (
+      <div className="container mx-auto flex min-h-[calc(100vh-8rem)] items-center justify-center px-4 py-12">
+        <Card className="w-full max-w-lg">
+          <CardHeader className="text-center">
+            <div className="mb-2 flex justify-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-muted">
+                <UserMinus className="h-7 w-7 text-muted-foreground" />
+              </div>
+            </div>
+            <CardTitle className="text-2xl">
+              You&apos;ve unregistered
+            </CardTitle>
+            <CardDescription className="text-base">
+              {join.event.name}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6 pt-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              You are no longer registered for this competition. Your
+              registration history has been kept.
+            </p>
+            <div className="flex justify-center">
+              <Link href={`/competitions/join/${encodeURIComponent(token)}`}>
+                <Button variant="ghost" size="sm">
+                  Back to Competition
+                </Button>
+              </Link>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   const challenge = await getParticipantChallengeState(
     join.event.id,
     pass.participantId,
   );
+
+  // The withdrawal rule is shared with the server mutation so the player UI and
+  // the authoritative endpoint can never disagree. Hiding the action is a UX
+  // courtesy only — the endpoint re-checks everything.
+  const event = await getCompetitionEvent(join.event.id);
+  const withdrawalBlockedReason = getWithdrawalBlockReason({
+    eventStatus: event?.status ?? "cancelled",
+    removedAt: pass.removedAt,
+    checkedInAt: pass.checkedInAt,
+    hasAttempts: (challenge?.attemptsUsed ?? 0) > 0,
+    providerMapped: pass.providerMapped,
+  });
+  const canWithdraw = withdrawalBlockedReason === null;
 
   const { data: profile } = await supabaseAdmin
     .from("profiles")
@@ -171,6 +233,14 @@ export default async function CompetitionPassPage({
               ? "Your challenge is complete."
               : "Complete the challenge at the event to qualify."}
           </p>
+
+          {/* T-REM-2: self-unregistration. Never rendered for a removed pass
+              (returned earlier) and gated by the shared withdrawal rule. */}
+          <UnregisterCompetitionButton
+            eventId={join.event.id}
+            canWithdraw={canWithdraw}
+            blockedReason={withdrawalBlockedReason}
+          />
 
           <div className="flex justify-center">
             <Link href={`/competitions/join/${encodeURIComponent(token)}`}>

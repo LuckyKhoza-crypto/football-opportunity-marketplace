@@ -38,6 +38,7 @@ const PROFILE_UNRELATED = "33333333-3333-4333-8333-333333333333";
 interface Builder {
   select: MockFn;
   eq: MockFn;
+  is: MockFn;
   order: MockFn;
   maybeSingle: MockFn;
   single: MockFn;
@@ -58,6 +59,7 @@ function makeBuilder(result: { data: unknown; error: unknown }): Builder {
   const passthrough = () => builder;
   builder.select = vi.fn(passthrough);
   builder.eq = vi.fn(passthrough);
+  builder.is = vi.fn(passthrough);
   builder.insert = vi.fn(passthrough);
   builder.update = vi.fn(passthrough);
   builder.delete = vi.fn(passthrough);
@@ -466,5 +468,24 @@ describe("COMP-002: getCompetitionStatistics", () => {
     expect(stats.not_qualified).toBe(1);
     expect(stats.registered).toBe(1);
     expect(stats.ambassadors).toBe(1);
+  });
+
+  it("T-REM-4: excludes soft-removed participants from every count", async () => {
+    const participantsBuilder = mockFromOnce({
+      data: [
+        { status: "registered" },
+        { status: "qualified" },
+      ],
+      error: null,
+    }); // participants (the DB filters out removed rows)
+    mockFromOnce({ data: [], error: null }); // ambassadors
+
+    const stats = await getCompetitionStatistics(EVENT_A);
+
+    // "current participation" — only active registrations are requested.
+    expect(participantsBuilder.is).toHaveBeenCalledWith("removed_at", null);
+    expect(stats.total).toBe(2);
+    expect(stats.registered).toBe(1);
+    expect(stats.qualified).toBe(1);
   });
 });

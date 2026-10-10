@@ -16,6 +16,8 @@ import type {
   ParticipantChallengeSummary,
   VerifiedCompetitionParticipant,
 } from "@/types/competition-attempt";
+import type { CompetitionEventStatus } from "@/types";
+import { getParticipantRemovalBlockReason } from "@/lib/competition-participant-admin";
 import {
   CheckCircle2,
   XCircle,
@@ -24,9 +26,12 @@ import {
   Target,
   Repeat,
   UserCheck,
+  UserMinus,
   Trophy,
   Users,
   Clock,
+  Ban,
+  ShieldAlert,
 } from "lucide-react";
 
 /**
@@ -50,6 +55,13 @@ interface ParticipantSummary {
   status: string;
   profile: { full_name: string | null } | null;
   verificationCode: string | null;
+  checked_in_at: string | null;
+  /** T-REM-3 — soft-removal timestamp (null when active). */
+  removedAt: string | null;
+  /** T-REM-3 — banned from THIS competition (competition-specific). */
+  banned: boolean;
+  /** T-REM-3 — synced to an external tournament (removal is blocked). */
+  providerMapped: boolean;
   attemptsUsed: number;
   attemptsRemaining: number;
   bestResult: number | null;
@@ -65,6 +77,8 @@ interface EventConfig {
   challenge_name: string;
   challenge_threshold: number;
   max_attempts: number;
+  /** T-REM-3 — the event lifecycle status gates host removal/ban eligibility. */
+  status: CompetitionEventStatus;
 }
 
 export function ParticipantManager({
@@ -97,19 +111,23 @@ export function ParticipantManager({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verifiedParticipantId]);
 
-  // Simple operational summary derived from the existing participant state.
+  // T-REM-4: the event-day summary reflects CURRENT participation, so
+  // soft-removed participants are excluded from every count. They remain in the
+  // list below (audit / ban management) with a "Removed" badge.
   const summary = useMemo(() => {
+    const active = participants.filter((p) => p.removedAt == null);
     let qualified = 0;
     let notQualified = 0;
-    for (const p of participants) {
+    for (const p of active) {
       if (p.passed) qualified += 1;
       else if (p.attemptsRemaining <= 0) notQualified += 1;
     }
     return {
-      total: participants.length,
+      total: active.length,
+      removed: participants.length - active.length,
       qualified,
       notQualified,
-      pending: participants.length - qualified - notQualified,
+      pending: active.length - qualified - notQualified,
     };
   }, [participants]);
 
@@ -193,6 +211,18 @@ export function ParticipantManager({
           }
         : prev,
     );
+  };
+
+  // T-REM-3 — reflect a successful remove/ban immediately in local state so the
+  // operator sees the new badge without a full reload (router.refresh also runs).
+  const handleManaged = (
+    participantId: string,
+    patch: { removedAt?: string | null; banned?: boolean },
+  ) => {
+    setParticipants((prev) =>
+      prev.map((p) => (p.id === participantId ? { ...p, ...patch } : p)),
+    );
+    setActive((prev) => (prev && prev.id === participantId ? { ...prev, ...patch } : prev));
   };
 
   return (
@@ -282,11 +312,27 @@ export function ParticipantManager({
         />
       )}
 
+      {/* T-REM-3 — Remove (R) / Ban (B) the selected participant */}
+      {active && (
+        <ParticipantActions
+          key={`manage-${active.id}`}
+          eventId={eventId}
+          eventStatus={event.status}
+          participant={active}
+          onManaged={handleManaged}
+        />
+      )}
+
       {/* Participant list */}
       <Card>
         <CardHeader className="gap-3">
           <CardTitle className="text-lg">
-            Participants ({participants.length})
+            Participants ({summary.total})
+            {summary.removed > 0 && (
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
+                · {summary.removed} removed
+              </span>
+            )}
           </CardTitle>
           {participants.length > 0 && (
             <Input
@@ -357,6 +403,11 @@ function toSummary(v: VerifiedCompetitionParticipant): ParticipantSummary {
     status: v.status,
     profile: v.displayName ? { full_name: v.displayName } : null,
     verificationCode: v.verificationCode,
+    checked_in_at: null,
+    // A freshly verified participant is active and not banned by definition.
+    removedAt: null,
+    banned: false,
+    providerMapped: false,
     attemptsUsed: v.attemptsUsed,
     attemptsRemaining: v.attemptsRemaining,
     bestResult: v.bestResult,
@@ -397,6 +448,16 @@ function ParticipantRow({
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-xs">
+        {participant.banned && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 font-semibold text-white">
+            <Ban className="h-3 w-3" /> Banned
+          </span>
+        )}
+        {!participant.banned && participant.removedAt != null && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-gray-200 px-2 py-0.5 font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+            Removed
+          </span>
+        )}
         <StatusBadge participant={participant} />
         <span className="text-muted-foreground">
           {participant.attemptsUsed}/{participant.attemptsUsed + participant.attemptsRemaining} attempts
@@ -619,5 +680,201 @@ function Detail({
         {value}
       </p>
     </div>
+  );
+}
+
+/**
+ * T-REM-3 — Remove (R) / Ban (B) controls for the selected participant.
+ *
+ * Two SEPARATE actions with very different meanings:
+ *   * Remove — soft-removes the registration. The player may register again
+ *     later, subject to the competition's rules. It does NOT ban them.
+ *   * Ban    — records a durable, competition-specific ban so the player can
+ *     never register again for THIS competition (even via another join link).
+ *
+ * Both require an explicit confirmation (the ban confirmation spells out the
+ * permanence). The server is the authoritative gate — this UI only collects the
+ * operator's intent and surfaces the server's success/error messages.
+ */
+function ParticipantActions({
+  eventId,
+  eventStatus,
+  participant,
+  onManaged,
+}: {
+  eventId: string;
+  eventStatus: CompetitionEventStatus;
+  participant: ParticipantSummary;
+  onManaged: (
+    participantId: string,
+    patch: { removedAt?: string | null; banned?: boolean },
+  ) => void;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<"remove" | "ban" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const label = displayName(participant);
+  const isRemoved = participant.removedAt != null;
+
+  // T-REM-3 — explain (and pre-emptively disable) an action the server would
+  // refuse, using the SAME pure policy the server enforces. A removed player has
+  // no active registration to release, so only the ban applies to them.
+  const activeBlockReason = isRemoved
+    ? null
+    : getParticipantRemovalBlockReason({
+        eventStatus,
+        removedAt: participant.removedAt,
+        checkedInAt: participant.checked_in_at,
+        hasAttempts: participant.attemptsUsed > 0,
+        providerMapped: participant.providerMapped,
+      });
+
+  const removeDisabled =
+    busy !== null || isRemoved || participant.banned || activeBlockReason != null;
+  const banDisabled = busy !== null || participant.banned || activeBlockReason != null;
+
+  const handleRemove = async () => {
+    if (busy) return;
+    const confirmed = confirm(
+      `Remove ${label} from this competition?\n\n` +
+        `Removing lets them register again later. It does NOT ban them. ` +
+        `Their attempts and history are kept.`,
+    );
+    if (!confirmed) return;
+
+    setBusy("remove");
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch(
+        `/api/competitions/${eventId}/participants/${participant.id}`,
+        { method: "DELETE" },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to remove participant");
+      }
+      onManaged(participant.id, {
+        removedAt: data.removedAt ?? new Date().toISOString(),
+        banned: false,
+      });
+      setSuccess(`${label} was removed. They can register again later.`);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleBan = async () => {
+    if (busy) return;
+    const confirmed = confirm(
+      `Ban ${label} from this competition?\n\n` +
+        `A ban is PERMANENT for this competition: they will NOT be able to ` +
+        `register again, even with another valid join link. This is not a ` +
+        `global account ban — it only affects this competition.`,
+    );
+    if (!confirmed) return;
+
+    setBusy("ban");
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await fetch(
+        `/api/competitions/${eventId}/participants/${participant.id}/ban`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to ban participant");
+      }
+      onManaged(participant.id, {
+        removedAt: data.removedAt ?? participant.removedAt,
+        banned: true,
+      });
+      setSuccess(
+        `${label} was banned from this competition and can no longer register.`,
+      );
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Card className="border-destructive/40">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <ShieldAlert className="h-5 w-5 text-destructive" />
+          Remove or Ban {label}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          <strong>Remove</strong> takes them out of this competition but lets them
+          register again later. <strong>Ban</strong> is permanent for this
+          competition — they can never register again, even with another valid
+          link. Neither action deletes their attempts or history.
+        </p>
+
+        {participant.banned && (
+          <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm font-medium text-destructive">
+            This player is already banned from this competition.
+          </p>
+        )}
+
+        {activeBlockReason && (
+          <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+            {activeBlockReason}
+          </p>
+        )}
+
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <Button
+            variant="outline"
+            onClick={handleRemove}
+            disabled={removeDisabled}
+          >
+            {busy === "remove" ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <UserMinus className="mr-2 h-4 w-4" />
+            )}
+            Remove
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={handleBan}
+            disabled={banDisabled}
+          >
+            {busy === "ban" ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Ban className="mr-2 h-4 w-4" />
+            )}
+            Ban
+          </Button>
+        </div>
+
+        {isRemoved && !participant.banned && (
+          <p className="text-xs text-muted-foreground">
+            This participant has already been removed. They may still register
+            again later, or you can ban them.
+          </p>
+        )}
+
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        {success && <p className="text-sm text-primary">{success}</p>}
+      </CardContent>
+    </Card>
   );
 }

@@ -513,6 +513,35 @@ describe("TOURN-001: addEventParticipantsToTournament", () => {
     expect(result.ok === true && result.data.skipped).toBe(0);
   });
 
+  it("T-REM-4: syncs only active participants (removed excluded at the query)", async () => {
+    const provider = fakeProvider({
+      addParticipants: vi
+        .fn()
+        .mockResolvedValue([{ ref: "p1", providerParticipantId: "11" }]),
+    });
+    vi.mocked(resolveTournamentProvider).mockReturnValue(provider);
+
+    mockFromOnce({ data: linkedEventRow(), error: null });
+    // The DB applies `removed_at IS NULL`, so only the active row is returned
+    // and the soft-removed participant is never handed to the provider.
+    const participantsBuilder = mockFromOnce({
+      data: [participantRow()],
+      error: null,
+    });
+    mockFromOnce({ data: null, error: null }); // mapping write
+
+    const result = await addEventParticipantsToTournament(
+      EVENT_A,
+      PROFILE_MANAGER,
+    );
+
+    expect(participantsBuilder.is).toHaveBeenCalledWith("removed_at", null);
+    expect(provider.addParticipants).toHaveBeenCalledWith(TOURNAMENT_ID, [
+      { ref: "p1", displayName: "Alex Mokoena" },
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
   it("skips participants that are already mapped and never calls the provider", async () => {
     const provider = fakeProvider();
     vi.mocked(resolveTournamentProvider).mockReturnValue(provider);
@@ -1354,6 +1383,50 @@ describe("TOURN-001: getEventTournamentBracket", () => {
         status: "registered",
       },
     ]);
+  });
+
+  it("T-REM-4: preserves a removed-but-mapped participant and logs the inconsistency", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const provider = fakeProvider({
+        getTournament: vi.fn().mockResolvedValue(tournament("started")),
+        getMatches: vi.fn().mockResolvedValue([] as TournamentMatch[]),
+      });
+      vi.mocked(resolveTournamentProvider).mockReturnValue(provider);
+
+      mockFromOnce({ data: linkedEventRow(), error: null });
+      // A removed participant that is still provider-mapped (not producible
+      // through FOM, but possible from out-of-band changes).
+      mockFromOnce({
+        data: [
+          {
+            id: "p1",
+            status: "qualified",
+            provider_participant_id: "11",
+            removed_at: "2026-02-01T00:00:00Z",
+            profile: { full_name: "Removed Champ" },
+          },
+        ],
+        error: null,
+      });
+
+      const result = await getEventTournamentBracket(EVENT_A, PROFILE_MANAGER);
+
+      // Provider state / historical bracket mapping is preserved untouched.
+      expect(result.ok).toBe(true);
+      expect(result.ok === true && result.data.participants).toEqual([
+        {
+          providerParticipantId: "11",
+          participantId: "p1",
+          displayName: "Removed Champ",
+          status: "qualified",
+        },
+      ]);
+      // The inconsistency is surfaced for reconciliation, never hidden.
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("does not read matches for a tournament that has not started", async () => {

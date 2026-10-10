@@ -62,7 +62,7 @@ A two-sided marketplace connecting football players with team opportunities. Pla
 ┌─────────────────────────────────────────────────────────────────────┐
 │                            Supabase                                 │
 │                                                                     │
-│  PostgreSQL (23 migrations)  ·  Storage (photos/logos)  ·  Realtime │
+│  PostgreSQL (27 migrations)  ·  Storage (photos/logos)  ·  Realtime │
 │  RLS enabled on all tables (defense-in-depth)                       │
 │  SECURITY DEFINER RPCs for atomic multi-table operations            │
 └─────────────────────────────────────────────────────────────────────┘
@@ -194,7 +194,7 @@ football-opportunity-marketplace/
 │   ├── colors.ts                 # Centralized color tokens
 │   └── utils.ts                  # shadcn cn() helper
 │
-├── supabase/migrations/          # 25 SQL migrations (see Database Schema)
+├── supabase/migrations/          # 27 SQL migrations (see Database Schema)
 ├── types/index.ts                # All shared TypeScript types + option constants
 ├── public/images/                # Static images
 ├── app_roadmap.md                # MVP-004 → MVP-022 tickets
@@ -254,7 +254,8 @@ All tables have RLS enabled. The application uses `supabaseAdmin` (service role)
 | `team_memberships` | Canonical "player is on team" | `team_profile_id`, `player_profile_id`, `position`, `role`, `status` (only `active`), UNIQUE index on `player_profile_id` (one-team-per-player MVP rule) |
 | `team_invites` | Reusable shared recruitment links | `team_profile_id`, `token_hash` (SHA-256, UNIQUE), `created_by`, `expires_at`, `revoked_at`. **No status column** — state is derived from timestamps. |
 | `competition_events` | Competition events (COMP-001) | `name`, `description`, `location`, `event_date TIMESTAMPTZ`, `status` (`draft`/`active`/`drawing`/`completed`/`cancelled`), `challenge_name`, `challenge_threshold`, `max_attempts`, `created_by` (FK profiles, authoritative manager), `provider` + `provider_tournament_id` + `tournament_format` (TOURN-001/002A — nullable external tournament mapping plus the FOM format it was created with; the provider columns are set together by a CHECK, and `tournament_format` is set in the same UPDATE as the mapping, backfilled to `single_elimination` for tournaments created before TOURN-002A) |
-| `competition_participants` | A profile's participation in an event (COMP-001) | `event_id` (FK competition_events), `profile_id` (FK **profiles** — NOT player_profiles), `status` (`registered`/`challenge_pending`/`qualified`/`not_qualified`), `checked_in_at`, `provider_participant_id` (TOURN-001 — nullable provider participant mapping), UNIQUE(`event_id`, `profile_id`) |
+| `competition_participants` | A profile's participation in an event (COMP-001) | `event_id` (FK competition_events), `profile_id` (FK **profiles** — NOT player_profiles), `status` (`registered`/`challenge_pending`/`qualified`/`not_qualified`), `checked_in_at`, `provider_participant_id` (TOURN-001 — nullable provider participant mapping), `removed_at` / `removed_by_profile_id` (FK profiles, `ON DELETE SET NULL`) / `removal_reason` (T-REM-1 — nullable **soft-removal**; `removed_at IS NULL` = active, a non-null value = removed without deleting the row; T-REM-3 writes `host_removal` for a host removal and `host_ban` when a ban also removes the registration), UNIQUE(`event_id`, `profile_id`) |
+| `competition_bans` | **T-REM-3** durable, competition-specific ban | `event_id` (FK competition_events, `ON DELETE CASCADE`), `profile_id` (FK profiles, `ON DELETE CASCADE` — the banned player), `banned_at TIMESTAMPTZ NOT NULL DEFAULT now()`, `banned_by_profile_id` (FK profiles, `ON DELETE SET NULL` — the acting manager), `reason` (nullable operator note), UNIQUE(`event_id`, `profile_id`). A ban prevents **re-registration for that competition only** (never a global account ban) and is checked server-side before any registration is created. |
 | `competition_ambassadors` | Competition-specific ambassador authorization (COMP-001) | `event_id` (FK competition_events), `profile_id` (FK profiles), UNIQUE(`event_id`, `profile_id`). **Never derived from `profiles.role`.** |
 | `competition_join_links` | Reusable ambassador join links / QR codes (COMP-003) | `event_id` (FK competition_events), `ambassador_id` (FK **competition_ambassadors** — the link owner is the ambassador relation, not a profile), `token_hash` (SHA-256 of the raw token, UNIQUE), `revoked_at`. The raw token is never stored. |
 | `competition_attempts` | One physical challenge attempt per row (COMP-004) | `event_id` (FK competition_events), `participant_id` (FK competition_participants), `attempt_number` (server-assigned, 1-based), `result_value NUMERIC` (generic — no unit baked in), `passed` (server-computed), `recorded_by_profile_id` (FK profiles), UNIQUE(`participant_id`, `attempt_number`). A `BEFORE INSERT` trigger rejects cross-event participants and attempts beyond the event's `max_attempts`. |
@@ -580,6 +581,9 @@ All API routes verify auth via `getServerSession(authOptions)` and use `supabase
 | `/api/competitions/[id]/ambassadors` | POST | Add an existing account as an ambassador by `email` (creator only). Friendly `404` when no account exists; duplicate returns `409`. |
 | `/api/competitions/[id]/ambassadors/[profileId]` | DELETE | Remove an ambassador (creator only). |
 | `/api/competitions/join` | POST | **Participant registration.** Body carries only the opaque `token`. The event, ambassador and profile are derived server-side (token + session). Validates: link exists, link not revoked, event `active`. Idempotent — returns the existing participant instead of a duplicate. Unauthenticated → `401`. |
+| `/api/competitions/[id]/withdraw` | POST | **T-REM-2 player self-unregistration.** Body ignored — the event comes from the route and the player from the session, so a caller can never unregister someone else. Re-applies every eligibility rule server-side (event `active`, registration not removed, not checked in, no recorded attempts, not provider-synced) and records a **soft** removal (`removed_at` / `removed_by_profile_id` / `removal_reason`), deleting nothing. A valid registration that cannot be withdrawn → `409`; no registration → `404`; unauthenticated → `401`. |
+| `/api/competitions/[id]/participants/[participantId]` | DELETE | **T-REM-3 host removal (R).** Creator **or** assigned ambassador removes an eligible participant. Soft removal only (nothing deleted, no cascade); does **not** ban — the player may register again later. Re-applies the shared lifecycle rules (event `active`, registration active, not checked in, no attempts, not provider-synced). Unauthorized → `403`; participant/event mismatch or missing → `404`; self → `400`; unsafe lifecycle state or already removed → `409`. |
+| `/api/competitions/[id]/participants/[participantId]/ban` | POST | **T-REM-3 ban (B).** Creator **or** assigned ambassador records a durable, **competition-specific** ban (optional `{ reason }`; the actor comes from the session). If the player is still actively registered they are ALSO removed using the same lifecycle/provider-safety checks; when that is unsafe the whole request is refused with `409` and **no** ban is written (no partial result). Duplicate ban requests are idempotent (`200`). A ban prevents future registration for this competition only — never a global account ban. |
 | `/api/competitions/[id]/join-links` | GET | List an event's join links (creator only). Never returns the raw token — only the digest was ever stored. |
 | `/api/competitions/[id]/join-links` | POST | Generate a reusable join link + QR for one of the event's ambassadors (creator only). Returns the raw token and absolute join URL **exactly once**. |
 | `/api/competitions/[id]/join-links/[linkId]` | DELETE | Revoke a join link (creator only). Preserves the row (`revoked_at`) so history survives. |
@@ -774,9 +778,214 @@ attempt number fail (`23505` → HTTP `409`); a passing attempt closes the chall
 (no further attempts); a `BEFORE INSERT` trigger independently rejects cross-event
 participants and any attempt beyond `max_attempts`.
 
-### Lifecycle (controlled)
+### Participant soft removal — foundation (T-REM-1)
 
-Transitions are validated server-side — the client can never set an arbitrary status:
+`supabase/migrations/0026_competition_participant_removal.sql` adds the **database
+foundation** for removing a participant from a competition **without deleting historical
+data**. It is strictly additive: it only adds three nullable columns to
+`competition_participants` and touches no existing constraint, foreign key, RLS policy,
+trigger or realtime publication.
+
+- **Soft removal, never a delete:** a participant row anchors `competition_attempts`,
+  `competition_drawings`, check-in/verification history, the `provider_participant_id`
+  mapping and notifications, so removal is recorded on the **same row** instead of
+  deleting it. `removed_at IS NULL` means **active**; a non-null `removed_at` means
+  **removed**.
+- **New columns (all nullable, no default):** `removed_at TIMESTAMPTZ`,
+  `removed_by_profile_id UUID REFERENCES profiles(id) ON DELETE SET NULL` (the removal
+  fact survives the operator profile's deletion) and `removal_reason TEXT` (free-form
+  operator note). Existing rows stay **active** with no backfill.
+- **No new registration value and no new index:** a nullable removal timestamp is
+  sufficient, and the existing `competition_participants_event_id_idx` (plus the leading
+  column of the UNIQUE `(event_id, profile_id)` index) already serve the
+  active-participant lookup — another `event_id` index would be redundant.
+- **Pure helper (`lib/competition.ts`):** `isActiveParticipant(participant)` implements the
+  single rule `removed_at IS NULL`, treating a missing/`undefined` value as **active** and
+  any non-null value (including malformed input) as **removed** — mirroring
+  `getJoinLinkState` / `isJoinLinkUsable` for `revoked_at`. It is deliberately tiny so
+  later tickets (participant lists, tournament eligibility, email recipient selection) can
+  reuse it without any query changes here.
+- **⚠️ PostgREST FK hint (applies to every `profiles` embed from
+  `competition_participants`):** `removed_by_profile_id` is a SECOND foreign key from
+  `competition_participants` to `profiles`, so an unqualified `profile:profiles(...)`
+  embed is now ambiguous and fails with `PGRST201` ("more than one relationship was
+  found"). Every such embed MUST pin the participant's own profile with the constraint
+  name: `profile:profiles!competition_participants_profile_id_fkey(...)`. This is applied
+  in `lib/competition-public-server.ts`, `lib/competition-attempt-server.ts`
+  (`listCompetitionParticipantsWithState` and `VERIFY_SELECT`) and
+  `lib/integrations/tournament/service.ts`. (`competition_ambassadors` has a single FK to
+  `profiles`, so its embeds are unaffected.)
+- **Scope:** this ticket adds the schema + helper only. Player self-unregistration,
+  host/ambassador removal, reactivation, app-wide filtering of removed participants,
+  tournament-sync changes and email/notification features are explicitly **out of scope**.
+
+### Player self-unregistration (T-REM-2)
+
+A player can unregister **themselves** from a competition before check-in, using the
+soft-removal foundation from T-REM-1. This ticket adds **no migration** — the 0026
+columns are sufficient.
+
+- **Endpoint:** `POST /api/competitions/[id]/withdraw` (route →
+  `withdrawFromCompetitionHandler` → `withdrawFromCompetition`). The request body is
+  ignored: the event comes from the route and the player from the NextAuth session, so
+  a caller can never target another player's registration.
+- **Server helper (`lib/competition-join-server.ts`):** `withdrawFromCompetition(eventId,
+  profileId)` loads the event, loads the caller's OWN participant row with an **explicit**
+  select (`removed_at`, `checked_in_at`, `provider_participant_id`, …), applies the shared
+  rule, then records the soft removal.
+- **Eligibility rule (shared, pure — `getWithdrawalBlockReason` in `lib/competition-join.ts`):**
+  withdrawal is allowed only when ALL of the following hold — the event is still `active`
+  (the same window that accepts registration), the registration is active
+  (`removed_at IS NULL`, via `isActiveParticipant`), the player has **not** checked in
+  (`checked_in_at IS NULL`), has **no** recorded `competition_attempts`, and has **not**
+  been synchronized to an external tournament (`provider_participant_id IS NULL`). The
+  SAME pure function gates the player UI and the server mutation, so they cannot drift.
+  Rejected states return **`409`**; a missing registration returns **`404`**; an
+  unauthenticated caller returns **`401`**.
+- **Concurrency / repeat requests:** the soft removal is a CONDITIONAL update
+  (`… WHERE id = ? AND profile_id = ? AND removed_at IS NULL AND checked_in_at IS NULL
+  AND provider_participant_id IS NULL`), so a concurrent check-in / provider sync /
+  second removal cannot bypass the checks — a zero-row update returns `409` and changes
+  nothing. Re-requesting against an already-removed row returns a clear `409`
+  ("You have already unregistered…") without touching history.
+- **History preserved:** the participant row is **never deleted** — only `removed_at`,
+  `removed_by_profile_id` (both the acting profile) and `removal_reason`
+  (`COMPETITION_SELF_REMOVAL_REASON = "self_unregistration"`) are written. Attempts,
+  drawings, check-in data, provider mapping and notifications all survive.
+- **Pass query (`getCompetitionPass`):** now explicitly selects `removed_at` and
+  `provider_participant_id` and returns `removedAt` + a `providerMapped` boolean (never
+  the provider id). The pass page renders a distinct **"You've unregistered"** state for a
+  removed registration instead of an active pass.
+- **UI (`components/competitions/UnregisterCompetitionButton.tsx`):** the action is a shared
+  client component following the existing player withdrawal pattern — confirmation step,
+  loading state, success message and server error; when the player has checked in (or
+  otherwise cannot withdraw) it explains why instead of showing the action. Hiding the
+  action is a UX courtesy only. It is used by the competition pass and the entry page.
+- **Participant discovery (where to click):**
+  - **`/competitions/entries` ("My Competitions")** lists the authenticated profile's
+    ACTIVE registrations (`listParticipantCompetitionEntries` in `lib/competition-server.ts`
+    — a query for `removed_at IS NULL` with the event embedded). A link is added to the main
+    navigation. Soft-removed registrations disappear from this list (the rows are kept).
+  - **`/competitions/[id]/entry`** is the participant entry page reached by clicking a
+    competition: it shows the participant their entry (verification code, QR, challenge
+    progress, status) and the unregister action. It is keyed by event id, so a participant
+    who has lost the original join link can still manage their registration. Only the
+    OWNING participant can view it (`getCompetitionPass` is looked up by event id +
+    session profile id); anyone else is redirected.
+- **Scope:** only player self-unregistration. Host/ambassador removal and competition-specific
+  banning are implemented separately in T-REM-3 (see below); reactivation, re-registration
+  after removal, and app-wide filtering of removed participants
+  (results, participant lists, drawing eligibility, tournament sync) remain **out of scope**.
+
+### Host/Ambassador removal + competition-specific ban (T-REM-3)
+
+An authorized **event creator or assigned ambassador** can remove a participant from
+their competition (R), and can additionally **ban** that player from the competition
+(B). The two actions are deliberately separate.
+
+- **Schema (`supabase/migrations/0027_competition_participant_bans.sql`):** adds the
+  durable, competition-specific `competition_bans` table (`event_id`, `profile_id`,
+  `banned_at`, `banned_by_profile_id` FK `ON DELETE SET NULL`, optional `reason`,
+  UNIQUE(`event_id`, `profile_id`)) with RLS enabled (manager/ambassador **SELECT only** —
+  no public read, no public write) and ONE atomic `SECURITY DEFINER` RPC
+  `remove_competition_participant`. A ban is keyed by competition + player precisely so it
+  **survives** the future redesign of the `competition_participants` UNIQUE(`event_id`,
+  `profile_id`) constraint, and it is **not** lost when a participant is removed.
+- **REMOVE (R) ≠ BAN (B):** a removal is a **soft** removal (`removed_at`,
+  `removed_by_profile_id`, `removal_reason = host_removal`) that preserves every historical
+  record (attempts, drawings, check-in/verification history, provider mapping,
+  notifications) and leaves the player **eligible to register again** later. A ban records
+  the durable ban row and (see below) removes any active registration with the same rules
+  — the player can **never** register again for that competition, even with another valid
+  join link.
+- **Atomic operation (one transaction):** the RPC locks the participant row
+  (`FOR UPDATE`), verifies the participant belongs to the event, refuses self-targeting,
+  applies the **same lifecycle rule as T-REM-2** (`active` event, registration active, not
+  checked in, **no** recorded attempts, **not** provider-synced) and soft-removes; when a
+  ban is requested it then inserts via `ON CONFLICT … DO NOTHING`. So a concurrent check-in
+  / provider sync / duplicate request cannot half-apply, and duplicate bans are idempotent.
+- **Banning an actively registered player also removes them** — and if that removal is
+  unsafe (checked in / has attempts / provider-synced) the WHOLE request is refused and
+  **no ban is written**, so there is never a misleading partial result. **A previously
+  removed participant is always ban-able** (there is no active registration to release).
+- **Authorization:** the actor profile comes from the NextAuth session (never the request
+  body) and is re-checked with the shared `canManageEvent` rule (creator **or** assigned
+  ambassador); the RPC re-checks the same rule in the database (defense-in-depth). The
+  acting profile can never itself be the target.
+- **Ban enforcement is server-side, at registration:** `registerForCompetition`
+  (`lib/competition-join-server.ts`) checks `competition_bans` by `(event_id, profile_id)`
+  **before** any registration row is created and returns `403` ("You are not allowed to
+  register for this competition.") to a banned player. This is the single registration
+  entry point (`POST /api/competitions/join`), so a ban cannot be bypassed by another valid
+  join link or by re-scanning a QR code.
+- **Provider safety:** provider participant removal is deliberately not implemented.
+  Instead of silently claiming a player was removed from an external bracket, an
+  already-synced participant (`provider_participant_id IS NOT NULL`) is blocked with an
+  actionable `409` for both removal and ban.
+- **Operator UI (`app/competitions/[id]/participants/ParticipantManager.tsx`):** the selected
+  participant exposes **separate Remove and Ban** actions, each with a confirmation step
+  (the ban confirmation spells out the permanence and that it is not a global account ban),
+  loading/success/error states, and a **Banned** badge (and a **Removed** badge) for
+  authorized managers. Banned players are shown only on this authenticated operator screen,
+  never in a public competition view.
+- **Scope:** host/ambassador removal + competition-specific ban only. Re-registration,
+  relaxing the `UNIQUE(event_id, profile_id)` constraint, global account bans, and provider
+  participant removal remain **out of scope** (separate future tickets).
+
+### Removed participants excluded from active views & operations (T-REM-4)
+
+Building on the soft-removal foundation (T-REM-1), self-unregistration (T-REM-2) and host
+removal/ban (T-REM-3), this ticket makes the single `removed_at IS NULL` active-participant
+rule authoritative for every **active operational** path. It adds **no migration** (the
+`0026` columns are sufficient) and never deletes or rewrites history — attempts, drawings,
+check-ins, notifications and provider mappings are all preserved.
+
+- **One rule, one source of truth:** active ⇔ `removed_at IS NULL`, via the shared
+  `isActiveParticipant` (`lib/competition.ts`) and direct query filters
+  (`.is("removed_at", null)`).
+- **Active operational paths now exclude removed participants at the QUERY level:**
+  - `getCompetitionParticipants` (management list) and therefore
+    `getCompetitionStatistics` — every count now means "current participation".
+  - `getQualifiedParticipantCount` — drawing eligibility (`status = qualified` **and**
+    active).
+  - `getParticipantById` / `getParticipantByProfile` — challenge state, attempt recording
+    and pass-token minting treat a removed participant as not found (`404`).
+  - `verifyCompetitionParticipantByCode` / `verifyCompetitionParticipantByToken` — a
+    removed participant can no longer check in.
+  - Tournament sync — `loadEventParticipantRows(…, { activeOnly: true })` means a removed
+    participant is **never newly pushed** into an external tournament.
+- **Deliberately retained (historical / audit):**
+  - The operator list (`listCompetitionParticipantsWithState`) keeps removed rows so the
+    host can still **BAN** them (T-REM-3) and so the participant's history stays
+    explainable; each removed row is badged **Removed** and its `canAttempt` is forced
+    `false`. The event-day summary counts and the list header count only **active**
+    participants (removed rows are surfaced separately, e.g. "· 1 removed").
+  - `getCompetitionParticipant` is a raw accessor — it returns the removed row so callers
+    can apply the rule themselves.
+  - Historical public results (`getPublicCompetitionResults`, `status = qualified`) and the
+    participant's own pass (`getCompetitionPass`; the entry page renders an explicit
+    "You've unregistered" state) are unchanged — a later removal never rewrites a completed
+    result.
+  - Tournament bracket / match-result / finalize / summary resolution loads **all** rows so
+    every existing provider mapping and completed bracket participant stays resolvable.
+- **Drawing:** the normal lifecycle already makes this impossible (removal requires an
+  event with **no** attempts and no check-in, while qualification requires a passing
+  attempt), but the explicit `removed_at IS NULL` filter on `getQualifiedParticipantCount`
+  makes the rule authoritative in the query anyway. The atomic
+  `start_competition_drawing` RPC is unchanged.
+- **Tournament-provider consistency:** provider-synced participants cannot be removed
+  through the FOM flow (removal/ban are refused while `provider_participant_id IS NOT
+  NULL`). A row that is somehow both soft-removed and provider-mapped is detected by
+  `loadEventParticipantRows` and **logged for reconciliation** — FOM preserves the mapping
+  and never silently mutates the external bracket.
+- **Registration / withdrawal unchanged:** registration stays idempotent on the existing
+  `UNIQUE(event_id, profile_id)` row (re-registration remains a separate ticket), and
+  self-unregistration already filters on `removed_at`. Competition bans (T-REM-3) stay
+  enforced independently, server-side at registration.
+- **Scope:** filtering removed participants out of active views/operations only. No
+  re-registration, provider participant removal, or tournament placements/results emails.
+
+
 
 ```
 draft    → active | cancelled
@@ -1256,8 +1465,16 @@ Ambassador → get unique join link + QR → player scans → /competitions/join
   merely hidden in the UI.
 - **Server helpers (`lib/competition-join-server.ts`):** `getCompetitionJoinByToken`
   (public resolution), `createCompetitionJoinLink` / `revokeCompetitionJoinLink`
-  (creator-only), `getCompetitionJoinLinks`, `registerForCompetition` (idempotent),
-  `getCompetitionPass`, `isRegisteredForEvent`.
+  (creator-only), `getCompetitionJoinLinks`, `registerForCompetition` (idempotent, and
+  rejects a banned profile — T-REM-3), `getCompetitionPass`, `isRegisteredForEvent`,
+  `withdrawFromCompetition` (T-REM-2 player self-unregistration).
+- **Host removal / ban helpers (`lib/competition-participant-admin-server.ts`, T-REM-3):**
+  `removeCompetitionParticipant`, `banCompetitionParticipant` (both authorize with
+  `canManageEvent` then run the atomic `remove_competition_participant` RPC), plus the
+  read helpers `isProfileBannedFromEvent` (server-side registration gate) and
+  `getBannedProfileIds` (operator list flags). Pure policy lives in
+  `lib/competition-participant-admin.ts`; the tested route handlers live in
+  `lib/competition-participant-admin-api.ts`.
 - **API handlers (`lib/competition-join-api.ts`):** the tested handlers the route
   files under `app/api/competitions/**` delegate to.
 - **Registration is lightweight:** it uses the existing auth system + `profiles`
@@ -1283,6 +1500,7 @@ Ambassador → get unique join link + QR → player scans → /competitions/join
 | Generate / revoke a join link | ✅ | ❌ | ❌ | ❌ |
 | Register (active event, valid link) | ✅ | ✅ | ✅ | ❌ |
 | View own pass | ✅ | ✅ | ✅ (own) | ❌ |
+| Unregister own registration (active event, not checked in, no attempts, not provider-synced) | ✅ | ✅ | ✅ (own) | ❌ |
 
 ---
 
@@ -1382,6 +1600,8 @@ marketplace event ─► createNotification() ─► notifications row (canonica
 | `supabase/migrations/0021_email_notification_deliveries.sql` | EMAIL-002 delivery table, RLS (no client policies), indexes and the atomic claim / stale-recovery RPCs |
 | `supabase/migrations/0022_notification_data.sql` | EMAIL-003 adds a nullable `notifications.data` JSONB column (JSON-object CHECK) for non-sensitive typed presentation metadata — RLS/indexes/realtime untouched |
 | `supabase/migrations/0025_competition_registration_notification.sql` | COMP-EMAIL-001 widens the `notifications.type` CHECK to allow `competition_registration_confirmed` and adds its per-participant dedup partial unique index. The type is deliberately **not** email-enabled (the confirmation email's QR is built in memory; see below). No token/QR/email payload is persisted. |
+| `supabase/migrations/0026_competition_participant_removal.sql` | T-REM-1 soft-removal foundation: adds nullable `removed_at`, `removed_by_profile_id` (FK `profiles(id)` `ON DELETE SET NULL`) and `removal_reason` to `competition_participants`. **Additive only** — no backfill/delete, no new registration value, no new index, and no change to the unique constraint, foreign keys, RLS, triggers or realtime. |
+| `supabase/migrations/0027_competition_participant_bans.sql` | **T-REM-3** durable, competition-specific bans: creates `competition_bans` (`event_id`/`profile_id` FKs, `banned_at`, `banned_by_profile_id` FK `ON DELETE SET NULL`, `reason`, UNIQUE(`event_id`, `profile_id`), FK indexes), enables RLS with manager/ambassador **SELECT-only** policies (no client write path) and adds the atomic `SECURITY DEFINER` RPC `remove_competition_participant` (row lock `FOR UPDATE`, shared creator-or-ambassador auth, the same lifecycle/provider checks as T-REM-2, soft removal, `ON CONFLICT … DO NOTHING` ban). Additive only — creates a new table + function; never drops/relaxes the existing `competition_participants` UNIQUE(`event_id`, `profile_id`) constraint. |
 
 ### Scope (EMAIL-001 / EMAIL-002)
 
@@ -1779,6 +1999,14 @@ Team reviews application → PATCH /api/applications/[id] { status: "accepted" }
 | `lib/competition-registration-notify.test.ts` | COMP-EMAIL-001: emails the QR built from the EXACT pass verify URL (regression), sends once + dedupes on repeat, skips non-participants / missing email, provider failure never throws, `after()` scheduling |
 | `lib/email/qr.test.ts` | COMP-EMAIL-001 server-side QR: base64 PNG data URI, deterministic per payload, rejects empty payload |
 | `lib/competition-registration-notification-migration.test.ts` | COMP-EMAIL-001 migration 0025: type CHECK widened + dedup index, no token/QR/email persisted, competition tables/RLS/realtime/outbox untouched |
+| `lib/competition-participant-removal-migration.test.ts` | T-REM-1 migration 0026: three nullable soft-removal columns, FK `profiles(id) ON DELETE SET NULL`, no NOT NULL/DEFAULT/backfill/delete/truncate, no new status/CHECK/index, and RLS/grants/triggers/realtime/unique-constraint untouched |
+| `lib/competition-participant-admin.test.ts` | T-REM-3 pure policy: distinct `host_removal`/`host_ban` reasons, the shared removal block-reason (event/removed/checked-in/attempts/provider order) and that no message leaks provider/id internals |
+| `lib/competition-participant-ban-migration.test.ts` | T-REM-3 migration 0027: `competition_bans` table/columns/FKs/UNIQUE, RLS SELECT-only policies, the `remove_competition_participant` RPC (`FOR UPDATE`, `ON CONFLICT … DO NOTHING`, creator-or-ambassador auth, lifecycle + provider checks), soft-removal only and no drop/relax of existing schema |
+| `lib/competition-participant-admin-server.test.ts` | T-REM-3 server helpers: auth delegation, atomic remove/ban RPC args, idempotent duplicate ban, previously-removed ban, provider-synced 409, error-code → status mapping, ban read helpers |
+| `lib/competition-participant-admin-api.test.ts` | T-REM-3 route handlers: 401/403/400/404/409/200 mapping, session-derived identity (body profile id ignored), trimmed ban reason |
+| `app/competitions/[id]/participants/__tests__/ParticipantManager.test.tsx` | T-REM-3 operator UI: separate Remove/Ban, confirmation for both (explicit ban warning), loading/success/error states, Banned/Removed badges and disabled actions |
+| `lib/competition.test.ts` (T-REM-1) | Active-participant rule: `removed_at IS NULL` → active, non-null (incl. malformed) → removed, missing/`undefined` → active, missing participant → inactive |
+| `lib/competition-server.test.ts` + `lib/competition-management-server.test.ts` + `lib/competition-drawing-server.test.ts` + `lib/competition-attempt-server.test.ts` + `lib/integrations/tournament/service.test.ts` (T-REM-4) | Active-participant filtering: the management list & statistics, and drawing eligibility, apply `.is("removed_at", null)`; check-in (code + QR), attempt recording and pass-token minting reject a removed participant (`404`); the operator list keeps removed rows for audit/ban but forces `canAttempt=false`; tournament sync requests only active participants; a removed-but-provider-mapped bracket participant is preserved untouched and logged for reconciliation |
 | `lib/matching/*.test.ts` | Matching engine: engine, applications, mvp014, player-experience, team-applications |
 | `app/api/**/__tests__/` | API routes: applications (acceptance, withdrawal), messages, notifications, outreach, team invites, team join, competitions (create + event/ambassador handlers) |
 | `app/homepage.test.ts` | Homepage rendering |
@@ -1843,6 +2071,10 @@ npm test          # Vitest
 - ✅ Immediate email delivery & retry reliability (EMAIL-002A — a fresh enqueue in `createNotification()` kicks the **existing** EMAIL-002 processor via Next.js `after()`, so the first send attempt happens immediately after the response without the marketplace request ever waiting on Brevo. Attempts are bounded to a **maximum of 5 total** (attempt 5 failure → `failed`; a 6th attempt is impossible — enforced in both the processor and the claim RPC), and Brevo failures never fail the underlying marketplace operation. No new scheduler, cron, polling loop, outbox or processor is introduced; immediate delivery is best-effort and without a recurring scheduler a future retry requires another invocation of the existing processing path.)
 - ✅ Tournament management workflow (TOURN-002 — the first usable tournament workflow on top of the TOURN-001 provider abstraction: create/link a competition's external tournament, sync the registered participants, start it, and view a **read-only, provider-neutral** bracket on the existing competition page (`/competitions/[id]`). Thin App Router routes under `app/api/competitions/[id]/tournament/**` delegate to the existing service; authorization stays the TOURN-001 `canManageEvent` creator-or-ambassador rule. No new tables, no mirrored bracket state, no provider import outside `providers/`.)
 - ✅ Tournament result reporting, advancement & finalization (TOURN-003 — an authorized competition manager reports a match result with **FOM-neutral input only** (`matchRef` + winning `competition_participants.id` + scores), the provider advances the winner, FOM re-reads the bracket through the existing `GET …/matches`, and the manager **explicitly finalizes** once the provider permits it so the champion is shown. Adds `POST /api/competitions/[id]/tournament/matches/[matchId]/result` and `POST /api/competitions/[id]/tournament/finalize` (thin routes over `reportEventMatchResult` / `finalizeEventTournament`), `toMatchReference` in `lib/integrations/tournament/contract.ts`, and the panel's result form + Finalize button. **Zero local bracket calculation / advancement logic** — the provider remains the source of truth for match state, progression and the winner; draws, re-reporting a settled match and reporting an unready/unmapped match are refused server-side; no provider id, match id or provider term reaches the browser, and **no migration was needed** because no match state is mirrored into Supabase.)
+- ✅ Host/ambassador participant removal + competition-specific ban (T-REM-3 — an authorized creator **or** assigned ambassador can REMOVE a participant (soft removal, nothing deleted; the player may register again later) and/or BAN them from that competition. A ban is a durable, competition-specific `competition_bans` row (`event_id` + `profile_id`, migration `0027`) enforced server-side in `registerForCompetition` **before** any registration is created, so it survives a prior removal and cannot be bypassed by another join link. Banning an actively registered player also removes them — atomically, via the `remove_competition_participant` `SECURITY DEFINER` RPC (`FOR UPDATE` + `ON CONFLICT … DO NOTHING`) using the same lifecycle/provider-safety checks as T-REM-2; an unsafe state is refused with **no** partial result, and a previously removed player remains ban-able. Adds `DELETE /api/competitions/[id]/participants/[participantId]` and `POST …/[participantId]/ban`, the `lib/competition-participant-admin*` helpers, and separate Remove/Ban controls with confirmations and Banned/Removed badges in the operator UI. Re-registration and global bans are out of scope.)
+- ✅ Removed participants excluded from active views & operations (T-REM-4 — the `removed_at IS NULL` rule now filters every **active operational** query: the management list & event statistics, drawing eligibility (`getQualifiedParticipantCount`), challenge state/attempt recording/pass-token minting, check-in by code or QR, and tournament participant sync all exclude soft-removed participants at the query level, so a removed participant can never qualify for a new challenge/drawing or be newly added to an external tournament. History is untouched: the operator list retains removed rows (badged **Removed**, `canAttempt` disabled) so hosts can still ban them, historical public results and the participant's own pass keep their meaning, and tournament bracket/result/finalize resolution still resolves every existing provider mapping. A removed-but-provider-mapped participant (impossible through FOM) is preserved and logged for reconciliation rather than silently mutating provider state. No migration — the `0026` columns are sufficient.)
+
+
 
 ---
 

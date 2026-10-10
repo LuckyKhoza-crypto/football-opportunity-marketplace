@@ -11,8 +11,12 @@ import {
   getAllowedEventTransitions,
   isValidEventTransition,
   computeCompetitionStatistics,
+  isActiveParticipant,
 } from "@/lib/competition";
-import type { CompetitionParticipantStatus } from "@/types";
+import type {
+  CompetitionParticipant,
+  CompetitionParticipantStatus,
+} from "@/types";
 
 describe("COMP-001: competition event status", () => {
   it("accepts every supported lifecycle status", () => {
@@ -270,3 +274,37 @@ describe("COMP-002: statistics", () => {
     expect(stats.registered + stats.challenge_pending).toBe(2);
   });
 });
+
+describe("T-REM-1: participant soft-removal (active-participant rule)", () => {
+  it("treats removed_at = null as active", () => {
+    expect(isActiveParticipant({ removed_at: null })).toBe(true);
+  });
+
+  it("treats a non-null removed_at as inactive", () => {
+    expect(
+      isActiveParticipant({ removed_at: "2025-01-01T00:00:00.000Z" }),
+    ).toBe(false);
+  });
+
+  it("treats a missing removed_at as active (existing rows default to active)", () => {
+    // A row read before/without the column still counts as active.
+    const missing = {} as Pick<CompetitionParticipant, "removed_at">;
+    expect(isActiveParticipant(missing)).toBe(true);
+    expect(
+      isActiveParticipant({
+        removed_at: undefined as unknown as string | null,
+      }),
+    ).toBe(true);
+  });
+
+  it("treats a missing participant as inactive", () => {
+    expect(isActiveParticipant(null)).toBe(false);
+    expect(isActiveParticipant(undefined)).toBe(false);
+  });
+
+  it("treats any non-null value — including malformed input — as removed", () => {
+    expect(isActiveParticipant({ removed_at: "" })).toBe(false);
+    expect(isActiveParticipant({ removed_at: "not-a-date" })).toBe(false);
+  });
+});
+

@@ -686,6 +686,16 @@ export interface CompetitionParticipant {
   profile_id: string;
   status: CompetitionParticipantStatus;
   checked_in_at: string | null;
+  /**
+   * T-REM-1 soft removal. NULL === active (see `isActiveParticipant`); a
+   * non-null timestamp means the participant was removed without deleting the
+   * row, so historical data is preserved.
+   */
+  removed_at: string | null;
+  /** profiles.id that performed the removal (null when unset / deleted). */
+  removed_by_profile_id: string | null;
+  /** Optional free-form operator note explaining the removal. */
+  removal_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -712,6 +722,30 @@ export const COMPETITION_PARTICIPANT_STATUS_COLORS: Record<
   qualified: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
   not_qualified: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400",
 };
+
+/**
+ * T-REM-3 — a durable, COMPETITION-SPECIFIC ban.
+ *
+ * A ban prevents the referenced profile from registering for the referenced
+ * event again — even after a prior registration was removed, and even via a
+ * different valid join link. It is NOT a global account ban, and it lives in its
+ * own table (keyed by event + profile) so it survives the future redesign of the
+ * `competition_participants` UNIQUE(event_id, profile_id) constraint and is not
+ * lost when a participant is removed.
+ */
+export interface CompetitionBan {
+  id: string;
+  /** competition_events.id — the competition the ban applies to. */
+  event_id: string;
+  /** profiles.id of the banned player. */
+  profile_id: string;
+  banned_at: string;
+  /** profiles.id of the authorized manager who recorded the ban (null if the
+   * acting profile was later deleted). */
+  banned_by_profile_id: string | null;
+  /** Optional free-form operator note. */
+  reason: string | null;
+}
 
 /**
  * Competition-specific authorization relationship. Being an ambassador is
@@ -797,5 +831,16 @@ export interface CompetitionPass {
   /** Short human-readable code an ambassador can use to locate the participant. */
   verificationCode: string | null;
   checkedInAt: string | null;
+  /**
+   * T-REM-2: non-null when the participant has unregistered (soft removal). The
+   * pass is still owned by the participant, so it is returned with this flag
+   * rather than hidden, letting the pass UI show that they are no longer entered.
+   */
+  removedAt: string | null;
+  /**
+   * T-REM-2: whether the participant has been synchronized to an external
+   * tournament. A boolean only — no provider id ever reaches the browser.
+   */
+  providerMapped: boolean;
   createdAt: string;
 }

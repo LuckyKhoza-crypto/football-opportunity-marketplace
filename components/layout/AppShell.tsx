@@ -17,6 +17,9 @@ const navItems = [
   // COMP-007: public competition results dashboard — visible to everyone,
   // including logged-out visitors, and requires no authentication.
   { label: "Competitions", href: "/competitions/results" },
+  // T-REM-2: the participant's own entered competitions (protected; the page
+  // itself redirects unauthenticated visitors through the existing login flow).
+  { label: "My Competitions", href: "/competitions/entries" },
 ];
 
 const playerNavItems = [

@@ -14,6 +14,7 @@ import type {
   CompetitionEvent,
   CompetitionEventStatus,
   CompetitionParticipant,
+  CompetitionParticipantStatus,
 } from "@/types";
 
 /**
@@ -161,9 +162,12 @@ export async function canManageEvent(
 }
 
 /**
- * Retrieve a participant record for a specific event/profile. Because the
- * database enforces UNIQUE(event_id, profile_id), at most one row exists.
- * Returns null when the profile is not registered for the event.
+ * COMP-001 — getCompetitionParticipant.
+ *
+ * T-REM-4: this is a RAW accessor. It deliberately returns the row even when it
+ * is soft-removed (`removed_at IS NOT NULL`) so callers can inspect the removal
+ * state and decide the correct policy with `isActiveParticipant`. It is never an
+ * "active participant" list by itself.
  */
 export async function getCompetitionParticipant(
   eventId: string,
@@ -184,9 +188,13 @@ export async function getCompetitionParticipant(
 }
 
 /**
- * List the participants of an event. This helper is server-only and is
- * intended for management/ambassador views; callers are responsible for
- * verifying authorization via canManageEvent before using it.
+ * List the ACTIVE participants of an event (`removed_at IS NULL`). This helper
+ * is server-only and is intended for management/ambassador views and event
+ * statistics, so soft-removed participants are excluded — they can no longer
+ * take part in the current competition. The removed rows are preserved in the
+ * database and remain available through the explicit audit/presentation layers
+ * (the operator list and the historical public result, see T-REM-4). Callers are
+ * responsible for verifying authorization via canManageEvent before using it.
  */
 export async function getCompetitionParticipants(
   eventId: string,
@@ -197,6 +205,8 @@ export async function getCompetitionParticipants(
     .from("competition_participants")
     .select("*")
     .eq("event_id", eventId)
+    // T-REM-4: active operational list — exclude soft-removed participants.
+    .is("removed_at", null)
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -367,8 +377,66 @@ export async function listAmbassadorCompetitionEvents(
 }
 
 /**
+ * T-REM-2 — a competition the given profile is REGISTERED for (participant-facing).
+ */
+export interface ParticipantCompetitionEntry {
+  event: CompetitionEvent;
+  participantId: string;
+  status: CompetitionParticipantStatus;
+  checkedInAt: string | null;
+}
+
+/**
+ * List the events the given profile has entered — the participant-facing
+ * counterpart to the manager/ambassador lists. Only ACTIVE registrations are
+ * returned (`removed_at IS NULL`), so a competition the player has unregistered
+ * from disappears from the list; the underlying row (and all history) is never
+ * deleted.
+ *
+ * Identity is the authenticated profile id — never client supplied. Returns an
+ * empty list on error (matching the `*-server.ts` convention).
+ */
+export async function listParticipantCompetitionEntries(
+  profileId: string,
+): Promise<ParticipantCompetitionEntry[]> {
+  if (!profileId) return [];
+
+  const { data, error } = await supabaseAdmin
+    .from("competition_participants")
+    .select("id, status, checked_in_at, removed_at, event:competition_events!inner(*)")
+    .eq("profile_id", profileId)
+    .is("removed_at", null)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("listParticipantCompetitionEntries: query failed", error);
+    return [];
+  }
+
+  return (
+    (data ?? []) as unknown as {
+      id: string;
+      status: CompetitionParticipantStatus;
+      checked_in_at: string | null;
+      removed_at: string | null;
+      event: CompetitionEvent | null;
+    }[]
+  )
+    .filter((row) => !!row.event)
+    .map((row) => ({
+      event: row.event as CompetitionEvent,
+      participantId: row.id,
+      status: row.status,
+      checkedInAt: row.checked_in_at,
+    }));
+}
+
+/**
  * Retrieve basic event statistics (simple counts — no analytics layer).
  * Works gracefully when there are zero participants or ambassadors.
+ *
+ * T-REM-4: the participant counts represent CURRENT participation, so
+ * soft-removed participants are excluded (via `getCompetitionParticipants`).
  */
 export async function getCompetitionStatistics(
   eventId: string,

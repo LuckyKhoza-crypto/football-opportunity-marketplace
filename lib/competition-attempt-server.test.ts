@@ -42,6 +42,7 @@ const PARTICIPANT_OTHER = "p9999999-9999-4999-8999-999999999999";
 interface Builder {
   select: MockFn;
   eq: MockFn;
+  is: MockFn;
   order: MockFn;
   maybeSingle: MockFn;
   single: MockFn;
@@ -56,6 +57,7 @@ function makeBuilder(result: { data: unknown; error: unknown }): Builder {
   const passthrough = () => builder;
   builder.select = vi.fn(passthrough);
   builder.eq = vi.fn(passthrough);
+  builder.is = vi.fn(passthrough);
   builder.insert = vi.fn(passthrough);
   builder.update = vi.fn(passthrough);
   builder.delete = vi.fn(passthrough);
@@ -804,6 +806,122 @@ describe("COMP-004: mintParticipantVerificationToken", () => {
   it("rejects when the profile is not a participant of the event", async () => {
     mockFromOnce({ data: null, error: null });
     const result = await mintParticipantVerificationToken(EVENT_A, "profile-x");
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(404);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+// T-REM-4 — removed participants are excluded from active operations
+// ═══════════════════════════════════════════════════════════════
+
+describe("T-REM-4: active vs removed participants", () => {
+  it("keeps removed rows in the operator list (audit) but disables new attempts", async () => {
+    mockFromOnce({ data: { id: EVENT_A }, error: null }); // isEventManager
+    mockFromOnce({ data: eventRow(), error: null }); // event
+    mockFromOnce({
+      data: [
+        {
+          id: PARTICIPANT_1,
+          event_id: EVENT_A,
+          profile_id: "profile-active",
+          status: "registered",
+          checked_in_at: null,
+          removed_at: null,
+          provider_participant_id: null,
+          created_at: "2026-01-01T00:00:00Z",
+          verification_code: "ACTIVE01",
+          profile: { full_name: "Active Player" },
+        },
+        {
+          id: PARTICIPANT_OTHER,
+          event_id: EVENT_A,
+          profile_id: "profile-removed",
+          status: "registered",
+          checked_in_at: null,
+          removed_at: "2026-02-01T00:00:00Z",
+          provider_participant_id: null,
+          created_at: "2026-01-02T00:00:00Z",
+          verification_code: "REMOVED1",
+          profile: { full_name: "Removed Player" },
+        },
+      ],
+      error: null,
+    }); // participants (mixed: active + removed)
+    mockFromOnce({ data: [], error: null }); // event attempts
+
+    const list = await listCompetitionParticipantsWithState(
+      EVENT_A,
+      PROFILE_MANAGER,
+    );
+
+    // The removed row is retained so the host can still BAN them (T-REM-3) and
+    // so history stays explainable — this is the deliberate audit view.
+    expect(list).toHaveLength(2);
+    const active = list.find((row) => row.id === PARTICIPANT_1);
+    const removed = list.find((row) => row.id === PARTICIPANT_OTHER);
+    expect(active?.canAttempt).toBe(true);
+    expect(removed?.removedAt).toBe("2026-02-01T00:00:00Z");
+    // ...but a removed participant can never start a new attempt.
+    expect(removed?.canAttempt).toBe(false);
+  });
+
+  it("rejects check-in for a removed participant (filtered at the lookup)", async () => {
+    mockFromOnce({ data: { id: EVENT_A }, error: null }); // isEventManager
+    // The DB excludes the removed row, so the code resolves to nothing.
+    const lookup = mockFromOnce({ data: null, error: null });
+
+    const result = await verifyCompetitionParticipantByCode(
+      EVENT_A,
+      PROFILE_MANAGER,
+      "REMOVED1",
+    );
+
+    expect(lookup.is).toHaveBeenCalledWith("removed_at", null);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(404);
+  });
+
+  it("rejects check-in by QR token for a removed participant", async () => {
+    const lookup = mockFromOnce({ data: null, error: null });
+
+    const result = await verifyCompetitionParticipantByToken(
+      PROFILE_MANAGER,
+      "some-raw-token",
+    );
+
+    expect(lookup.is).toHaveBeenCalledWith("removed_at", null);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(404);
+  });
+
+  it("rejects a new attempt for a removed participant", async () => {
+    mockFromOnce({ data: { id: EVENT_A }, error: null }); // isEventManager
+    mockFromOnce({ data: eventRow(), error: null }); // event
+    // getParticipantById excludes the removed row → participant not found.
+    const lookup = mockFromOnce({ data: null, error: null });
+
+    const result = await recordCompetitionAttempt(
+      EVENT_A,
+      PROFILE_MANAGER,
+      PARTICIPANT_1,
+      30,
+    );
+
+    expect(lookup.is).toHaveBeenCalledWith("removed_at", null);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(404);
+  });
+
+  it("rejects minting a new pass token for a removed participant", async () => {
+    const lookup = mockFromOnce({ data: null, error: null });
+
+    const result = await mintParticipantVerificationToken(
+      EVENT_A,
+      "profile-removed",
+    );
+
+    expect(lookup.is).toHaveBeenCalledWith("removed_at", null);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.status).toBe(404);
   });

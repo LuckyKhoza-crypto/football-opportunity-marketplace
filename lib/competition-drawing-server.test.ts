@@ -35,6 +35,7 @@ const WINNER_PROFILE = "44444444-4444-4444-8444-444444444444";
 interface Builder {
   select: MockFn;
   eq: MockFn;
+  is: MockFn;
   order: MockFn;
   maybeSingle: MockFn;
   single: MockFn;
@@ -49,6 +50,7 @@ function makeBuilder(result: Record<string, unknown>): Builder {
   const passthrough = () => builder;
   builder.select = vi.fn(passthrough);
   builder.eq = vi.fn(passthrough);
+  builder.is = vi.fn(passthrough);
   builder.insert = vi.fn(passthrough);
   builder.update = vi.fn(passthrough);
   builder.delete = vi.fn(passthrough);
@@ -132,6 +134,16 @@ describe("COMP-006: getQualifiedParticipantCount", () => {
   it("returns 0 without querying for a missing event id", async () => {
     expect(await getQualifiedParticipantCount("")).toBe(0);
     expect(supabaseAdmin.from).not.toHaveBeenCalled();
+  });
+
+  it("T-REM-4: excludes soft-removed participants from drawing eligibility", async () => {
+    const builder = mockFromOnce({ count: 0, data: null, error: null });
+
+    const count = await getQualifiedParticipantCount(EVENT_A);
+
+    expect(count).toBe(0);
+    expect(builder.eq).toHaveBeenCalledWith("status", "qualified");
+    expect(builder.is).toHaveBeenCalledWith("removed_at", null);
   });
 });
 

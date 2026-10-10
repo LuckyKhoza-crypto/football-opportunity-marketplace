@@ -218,6 +218,11 @@ interface EventParticipantRow {
   id: string;
   status: CompetitionParticipantStatus;
   provider_participant_id: string | null;
+  /**
+   * T-REM-4 soft-removal timestamp. NULL (or missing) === active. Read so the
+   * loader can detect the "removed but provider-mapped" consistency case.
+   */
+  removed_at: string | null;
   profile: { full_name: string | null } | null;
 }
 
@@ -228,8 +233,11 @@ type LoadedEvent = { ok: true; event: EventTournamentRow } | Failure;
 const EVENT_TOURNAMENT_COLUMNS =
   "id, name, provider, provider_tournament_id, tournament_format";
 
+// Migration 0026 (T-REM-1) added a second FK from competition_participants to
+// profiles (removed_by_profile_id), so the `profiles` embed needs an explicit FK
+// hint (PostgREST PGRST201 otherwise). The hint pins the participant's OWN profile.
 const PARTICIPANT_COLUMNS =
-  "id, status, provider_participant_id, profile:profiles(full_name)";
+  "id, status, provider_participant_id, removed_at, profile:profiles!competition_participants_profile_id_fkey(full_name)";
 
 /** Provider error code → HTTP status FOM reports to its own caller. */
 const PROVIDER_ERROR_STATUS: Record<TournamentProviderErrorCode, number> = {
@@ -379,15 +387,38 @@ function providerForEvent(
   return resolveTournamentProvider(provider ?? fallbackProviderId ?? null);
 }
 
-/** All participant rows of an event, in the competition's own order. */
+/**
+ * All participant rows of an event, in the competition's own order.
+ *
+ * T-REM-4: `activeOnly` excludes soft-removed participants (`removed_at IS
+ * NULL`) at the QUERY level. It is used ONLY by the sync operation, so a removed
+ * participant is never newly pushed into an external tournament. The history
+ * readers (bracket / match result / finalize / summary) load ALL rows so every
+ * existing provider mapping and past bracket participant stays resolvable — a
+ * removed participant's historical result is never hidden or rewritten.
+ *
+ * If a row is BOTH soft-removed and still provider-mapped it is a consistency
+ * case that cannot be produced through FOM (removal and ban are refused while
+ * `provider_participant_id IS NOT NULL`, and the sync path above never maps a
+ * removed participant). It is surfaced with a warning instead of silently
+ * mutating provider state.
+ */
 async function loadEventParticipantRows(
   eventId: string,
+  options: { activeOnly?: boolean } = {},
 ): Promise<{ ok: true; rows: EventParticipantRow[] } | Failure> {
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("competition_participants")
     .select(PARTICIPANT_COLUMNS)
-    .eq("event_id", eventId)
-    .order("created_at", { ascending: true });
+    .eq("event_id", eventId);
+
+  if (options.activeOnly) {
+    query = query.is("removed_at", null);
+  }
+
+  const { data, error } = await query.order("created_at", {
+    ascending: true,
+  });
 
   if (error) {
     console.error("loadEventParticipantRows: query failed", error);
@@ -398,7 +429,24 @@ async function loadEventParticipantRows(
     };
   }
 
-  return { ok: true, rows: (data ?? []) as unknown as EventParticipantRow[] };
+  const rows = (data ?? []) as unknown as EventParticipantRow[];
+
+  // Consistency guard (T-REM-4): preserve the mapping, never mutate the
+  // provider, but make the inconsistent state visible for reconciliation.
+  const removedAndMapped = rows.filter(
+    (row) => row.removed_at != null && row.provider_participant_id != null,
+  );
+  if (removedAndMapped.length > 0) {
+    console.warn(
+      "[tournament] soft-removed participants are still mapped to the external tournament; preserving provider state for reconciliation",
+      {
+        eventId,
+        participantIds: removedAndMapped.map((row) => row.id),
+      },
+    );
+  }
+
+  return { ok: true, rows };
 }
 
 /**
@@ -688,6 +736,11 @@ export async function createEventTournament(
  * participants whose mapping cannot be stored, the call FAILS (it never reports
  * success) and the affected ids are logged for reconciliation — see the known
  * limitations in the README.
+ *
+ * T-REM-4: only ACTIVE participants are synced (`removed_at IS NULL`), so a
+ * soft-removed participant is never newly added to the external tournament.
+ * Participants already mapped from an earlier sync are skipped, so the call is
+ * safe to repeat for a partially synced competition.
  */
 export async function addEventParticipantsToTournament(
   eventId: string,
@@ -702,7 +755,10 @@ export async function addEventParticipantsToTournament(
   const { event } = loaded;
   const link = linkOf(event);
 
-  const participants = await loadEventParticipantRows(event.id);
+  // T-REM-4: never newly sync a soft-removed participant.
+  const participants = await loadEventParticipantRows(event.id, {
+    activeOnly: true,
+  });
   if (!participants.ok) return participants;
 
   const rows = participants.rows;
@@ -779,6 +835,14 @@ export async function addEventParticipantsToTournament(
  * Idempotent: starting an already-started tournament returns its current state
  * with `started: false`. A `completed` tournament is rejected with 409, and an
  * unrecognised provider state is refused rather than acted upon.
+ *
+ * T-REM-4: starting does not select FOM participants — the bracket is produced
+ * from the participants already present at the provider, and a soft-removed
+ * participant is never provider-mapped (sync filters them, and removal/ban are
+ * refused while `provider_participant_id IS NOT NULL`). A removed-but-mapped
+ * participant — impossible through FOM — is detected and logged by
+ * `loadEventParticipantRows`, and its provider state is preserved for manual
+ * reconciliation rather than being mutated here.
  */
 export async function startEventTournament(
   eventId: string,
