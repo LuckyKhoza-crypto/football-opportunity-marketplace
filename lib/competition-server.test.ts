@@ -34,6 +34,7 @@ type MockFn = ReturnType<typeof vi.fn>;
 interface QueryChain {
   select: MockFn;
   eq: MockFn;
+  is: MockFn;
   order: MockFn;
   maybeSingle: MockFn;
   single: MockFn;
@@ -51,6 +52,7 @@ function createChain(): QueryChain {
   const handler: QueryChain = {
     select: vi.fn(() => handler),
     eq: vi.fn(() => handler),
+    is: vi.fn(() => handler),
     order: vi.fn(() => handler),
     maybeSingle: vi.fn(),
     single: vi.fn(),
@@ -235,6 +237,18 @@ describe("COMP-001: participants reference profiles (not player_profiles)", () =
     const participants = await getCompetitionParticipants(EVENT_A);
     expect(participants).toHaveLength(2);
     expect(participants[0].event_id).toBe(EVENT_A);
+  });
+
+  it("T-REM-4: requests only active participants (removed_at IS NULL)", async () => {
+    const handler = mockArrayResult({
+      data: [{ id: "p1", event_id: EVENT_A, profile_id: PROFILE_1 }],
+      error: null,
+    });
+
+    await getCompetitionParticipants(EVENT_A);
+
+    // The exclusion happens at the QUERY level, not in application memory.
+    expect(handler.is).toHaveBeenCalledWith("removed_at", null);
   });
 
   it("returns an empty list on query error (no throw)", async () => {

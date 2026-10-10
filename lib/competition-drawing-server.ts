@@ -78,8 +78,15 @@ function mapDrawingRpcError(error: string | undefined): {
 
 /**
  * Count the participants who have successfully qualified for an event
- * (status = 'qualified'). This is the server-side eligibility set for the
- * drawing — it is never derived from client-supplied values.
+ * (status = 'qualified' AND an active registration, `removed_at IS NULL`). This
+ * is the server-side eligibility set for the drawing — it is never derived from
+ * client-supplied values.
+ *
+ * T-REM-4: soft-removed participants are excluded so a removed participant can
+ * never be counted as drawing-eligible. (Through the normal lifecycle this is
+ * already impossible — removal is refused once a participant has any attempt,
+ * and qualifying requires a passing attempt — but the explicit filter makes the
+ * rule authoritative in the query rather than relying on that invariant.)
  */
 export async function getQualifiedParticipantCount(
   eventId: string,
@@ -90,7 +97,9 @@ export async function getQualifiedParticipantCount(
     .from("competition_participants")
     .select("id", { count: "exact", head: true })
     .eq("event_id", eventId)
-    .eq("status", "qualified");
+    .eq("status", "qualified")
+    // T-REM-4: a removed participant is not drawing-eligible.
+    .is("removed_at", null);
 
   if (error) {
     console.error("getQualifiedParticipantCount: query failed", error);

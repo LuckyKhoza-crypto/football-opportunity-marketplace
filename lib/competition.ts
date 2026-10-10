@@ -1,5 +1,6 @@
 import type {
   CompetitionEventStatus,
+  CompetitionParticipant,
   CompetitionParticipantStatus,
 } from "@/types";
 
@@ -171,4 +172,31 @@ export function computeCompetitionStatistics(
   }
 
   return stats;
+}
+
+/**
+ * T-REM-1 — Soft-removal / active-participant rule.
+ *
+ * Soft removal never deletes the participant row: `removed_at` is set to a
+ * timestamp and all history (attempts, drawings, check-ins, provider mapping,
+ * notifications) is preserved. The whole rule is therefore one predicate:
+ *
+ *   active participant  ===  removed_at IS NULL
+ *
+ * A missing (`undefined`) `removed_at` is treated exactly like SQL NULL, so a
+ * row read before/without the column — and every existing registration — is
+ * ACTIVE by default. ANY non-null value, including a malformed one, means the
+ * participant has been removed, mirroring the SQL `removed_at IS NULL` rule
+ * (the same shape as `getJoinLinkState` / `isJoinLinkUsable` for
+ * `revoked_at`).
+ *
+ * Kept deliberately tiny and pure so later tickets (participant lists,
+ * tournament eligibility, email recipient selection) can reuse it without a new
+ * module or any query changes here.
+ */
+export function isActiveParticipant(
+  participant: Pick<CompetitionParticipant, "removed_at"> | null | undefined,
+): boolean {
+  if (!participant) return false;
+  return participant.removed_at == null;
 }

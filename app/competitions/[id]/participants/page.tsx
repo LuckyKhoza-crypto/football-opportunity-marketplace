@@ -89,6 +89,7 @@ export default async function CompetitionParticipantsPage({
             challenge_name: event.challenge_name,
             challenge_threshold: event.challenge_threshold,
             max_attempts: event.max_attempts,
+            status: event.status,
           }}
           initialParticipants={participants}
           verifiedParticipantId={verified ?? null}

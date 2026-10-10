@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
+import { isActiveParticipant } from "@/lib/competition";
 import type {
   CompetitionEventStatus,
   CompetitionJoinLink,
@@ -106,6 +107,82 @@ export function getRegistrationClosedReason(
     case "cancelled":
       return "This competition has been cancelled.";
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Player self-unregistration (T-REM-2)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * The `removal_reason` recorded for a player unregistering THEMSELVES. Kept as
+ * a named constant so the value is consistent everywhere and later tickets
+ * (host/ambassador removal) can record a different, equally explicit reason.
+ */
+export const COMPETITION_SELF_REMOVAL_REASON = "self_unregistration";
+
+/**
+ * The data needed to decide whether a participant may unregister. Deliberately
+ * primitive so it can be built from a pass row or a fresh server read.
+ */
+export interface CompetitionWithdrawalState {
+  /** The event lifecycle status. */
+  eventStatus: CompetitionEventStatus;
+  /** `competition_participants.removed_at` (null/undefined === active). */
+  removedAt: string | null | undefined;
+  /** `competition_participants.checked_in_at` (null when not checked in). */
+  checkedInAt: string | null | undefined;
+  /** Whether the participant has ANY recorded `competition_attempts`. */
+  hasAttempts: boolean;
+  /** Whether the participant is mapped to an external tournament. */
+  providerMapped: boolean;
+}
+
+/**
+ * T-REM-2 — Withdrawal eligibility rule.
+ *
+ * Returns the human-readable reason withdrawal is BLOCKED, or `null` when the
+ * participant is allowed to unregister. It is intentionally pure so the player
+ * UI (which hides/disables the action) and the authoritative server mutation
+ * share the SAME rule and cannot drift apart. Hiding the button is never the
+ * gate — `withdrawFromCompetition` re-applies this rule server-side.
+ *
+ * A participant may unregister only while:
+ *   * the event is still accepting registrations (`active`); once it moves to
+ *     `drawing` / `completed` / `cancelled` the participant list is frozen,
+ *   * the registration is still active (`removed_at IS NULL`),
+ *   * they have NOT checked in,
+ *   * they have NO recorded attempts,
+ *   * they have NOT been synchronized to an external tournament.
+ *
+ * The messages never mention a provider or an internal id.
+ */
+export function getWithdrawalBlockReason(
+  state: CompetitionWithdrawalState,
+): string | null {
+  // Withdrawal follows the registration window: only an `active` event accepts
+  // (or releases) participants.
+  if (!isEventOpenForRegistration(state.eventStatus)) {
+    return "This competition is no longer accepting withdrawals.";
+  }
+
+  // Reuse the T-REM-1 active-participant rule rather than re-deriving it.
+  if (!isActiveParticipant({ removed_at: state.removedAt ?? null })) {
+    return "You have already unregistered from this competition.";
+  }
+
+  if (state.checkedInAt != null) {
+    return "You have already checked in and can no longer unregister.";
+  }
+
+  if (state.hasAttempts) {
+    return "You have already started the challenge and can no longer unregister.";
+  }
+
+  if (state.providerMapped) {
+    return "You can no longer unregister from this competition.";
+  }
+
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════════

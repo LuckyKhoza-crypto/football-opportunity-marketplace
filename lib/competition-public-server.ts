@@ -126,9 +126,16 @@ export async function getPublicCompetitionResults(): Promise<
 
   // 2. Qualified participants for every returned competition, joined with the
   //    public profiles fields (name + avatar). A single query — no fan-out.
+  //
+  //    The `profiles!...` FK hint is REQUIRED: migration 0026 (T-REM-1) added a
+  //    second FK from competition_participants to profiles
+  //    (removed_by_profile_id), so an unqualified `profiles` embed is ambiguous
+  //    (PostgREST PGRST201). The hint pins the participant's OWN profile.
   const { data: participantsData, error: participantsError } = await supabaseAdmin
     .from("competition_participants")
-    .select("event_id, profile_id, profile:profiles(full_name, avatar_url)")
+    .select(
+      "event_id, profile_id, profile:profiles!competition_participants_profile_id_fkey(full_name, avatar_url)",
+    )
     .in("event_id", eventIds)
     .eq("status", "qualified")
     .order("created_at", { ascending: true });

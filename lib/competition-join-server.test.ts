@@ -266,6 +266,8 @@ describe("COMP-003: registerForCompetition", () => {
       },
       error: null,
     });
+    // T-REM-3: not banned from this competition
+    mockMaybeSingle({ data: null, error: null });
     // no existing participant
     mockMaybeSingle({ data: null, error: null });
     // insert participant
@@ -369,6 +371,8 @@ describe("COMP-003: registerForCompetition", () => {
       },
       error: null,
     });
+    // T-REM-3: not banned from this competition
+    mockMaybeSingle({ data: null, error: null });
     // existing participant
     mockMaybeSingle({
       data: {
@@ -385,7 +389,31 @@ describe("COMP-003: registerForCompetition", () => {
     if (!result.ok) return;
     expect(result.data.alreadyRegistered).toBe(true);
     expect(result.data.participantId).toBe("part-1");
-    // Only the two lookup chains ran — no insert chain was created.
+    // Only the three lookup chains ran — no insert chain was created.
+    expect(vi.mocked(supabaseAdmin.from).mock.results).toHaveLength(3);
+  });
+
+  it("rejects a BANNED profile before any registration is created (T-REM-3)", async () => {
+    // link lookup (active)
+    mockMaybeSingle({
+      data: {
+        id: "link-1",
+        event_id: EVENT_A,
+        ambassador_id: AMBASSADOR_A,
+        revoked_at: null,
+        event: { id: EVENT_A, status: "active" },
+        ambassador: { id: AMBASSADOR_A, event_id: EVENT_A },
+      },
+      error: null,
+    });
+    // T-REM-3: banned
+    mockMaybeSingle({ data: { id: "ban-1" }, error: null });
+
+    const result = await registerForCompetition(JOIN_TOKEN, PROFILE_1);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.status).toBe(403);
+    // No participant lookup and no insert happen for a banned profile.
     expect(vi.mocked(supabaseAdmin.from).mock.results).toHaveLength(2);
   });
 

@@ -65,6 +65,22 @@ export interface CompetitionParticipantWithState {
   } | null;
   /** Organizer-visible verification code (safe for the event operator). */
   verificationCode: string | null;
+  /**
+   * T-REM-3 — when the registration was soft-removed (null when active). Used
+   * by the operator UI to show a "Removed" state without hiding the row.
+   */
+  removedAt: string | null;
+  /**
+   * T-REM-3 — whether this player is banned from THIS competition. A boolean
+   * only; the underlying ban record is never exposed to the browser.
+   */
+  banned: boolean;
+  /**
+   * T-REM-3 — whether the participant is mapped to an external tournament. A
+   * boolean only (the provider's own id never leaves the server); used by the
+   * operator UI to explain why a removal cannot proceed.
+   */
+  providerMapped: boolean;
   attemptsUsed: number;
   attemptsRemaining: number;
   bestResult: number | null;

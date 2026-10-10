@@ -9,8 +9,11 @@ import {
   generateVerificationCode,
   generateVerificationToken,
   hashVerificationToken,
+  getWithdrawalBlockReason,
+  COMPETITION_SELF_REMOVAL_REASON,
 } from "@/lib/competition-join";
-import { isEventManager } from "@/lib/competition-server";
+import { getCompetitionEvent, isEventManager } from "@/lib/competition-server";
+import { isProfileBannedFromEvent } from "@/lib/competition-participant-admin-server";
 import type {
   CompetitionEvent,
   CompetitionJoinLink,
@@ -363,7 +366,8 @@ export interface RegistrationResult {
  *   2. link is not revoked,
  *   3. event is active (accepting registration),
  *   4. event/ambassador derived from the token (never client input),
- *   5. existing participant returned idempotently.
+ *   5. the profile is not banned from THIS competition (T-REM-3),
+ *   6. existing participant returned idempotently.
  *
  * Uses the participant's OWN profile id (the authenticated user) — a client can
  * never register another profile, spoof event_id, or assign themselves as an
@@ -431,6 +435,18 @@ export async function registerForCompetition(
   }
 
   const eventId = link.event_id;
+
+  // T-REM-3: a competition-specific ban is enforced HERE — on the server, before
+  // any registration is created. A banned player is rejected even though the
+  // link is valid and the event is open, and even if a previous registration was
+  // removed. The message never reveals ban-management internals.
+  if (await isProfileBannedFromEvent(eventId, profileId)) {
+    return {
+      ok: false,
+      error: "You are not allowed to register for this competition.",
+      status: 403,
+    };
+  }
 
   // Idempotency: return the existing participant rather than duplicating.
   const { data: existing } = await supabaseAdmin
@@ -547,7 +563,9 @@ export async function getCompetitionPass(
 
   const { data, error } = await supabaseAdmin
     .from("competition_participants")
-    .select("id, event_id, status, verification_code, checked_in_at, created_at")
+    .select(
+      "id, event_id, status, verification_code, checked_in_at, removed_at, provider_participant_id, created_at",
+    )
     .eq("event_id", eventId)
     .eq("profile_id", profileId)
     .maybeSingle();
@@ -560,6 +578,8 @@ export async function getCompetitionPass(
     status: CompetitionParticipantStatus;
     verification_code: string | null;
     checked_in_at: string | null;
+    removed_at: string | null;
+    provider_participant_id: string | null;
     created_at: string;
   };
 
@@ -569,6 +589,10 @@ export async function getCompetitionPass(
     status: row.status,
     verificationCode: row.verification_code,
     checkedInAt: row.checked_in_at,
+    // `?? null` keeps a missing column (a row read before migration 0026) active.
+    removedAt: row.removed_at ?? null,
+    // A boolean only — the provider participant id never leaves the server.
+    providerMapped: row.provider_participant_id != null,
     createdAt: row.created_at,
   };
 }
@@ -592,6 +616,184 @@ export async function isRegisteredForEvent(
 
   if (error) return false;
   return !!data;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Player self-unregistration (T-REM-2)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * The fields every withdrawal eligibility check needs. Selected EXPLICITLY so a
+ * partially-selected participant row can never be mistaken for an active one —
+ * `removed_at` in particular must always be present.
+ */
+const WITHDRAWAL_SELECT =
+  "id, event_id, profile_id, status, checked_in_at, provider_participant_id, removed_at, created_at";
+
+export interface WithdrawalResult {
+  participantId: string;
+  eventId: string;
+  /** When the soft removal was recorded. */
+  removedAt: string;
+}
+
+/**
+ * T-REM-2 — a player unregisters THEMSELVES from a competition.
+ *
+ * The player identity is the authenticated `profileId` supplied by the caller
+ * (resolved from the NextAuth session) — never a body-supplied id. This helper:
+ *
+ *   1. loads the event (its lifecycle status gates withdrawal),
+ *   2. loads the caller's OWN registration for that event (explicit select),
+ *   3. applies the shared `getWithdrawalBlockReason` rule (event active,
+ *      not removed, not checked in, no attempts, not provider-synced),
+ *   4. records the soft removal with a CONDITIONAL update whose WHERE clause
+ *      re-checks the eligibility (`removed_at`/`checked_in_at`/
+ *      `provider_participant_id` all NULL), so a concurrent check-in or
+ *      provider sync cannot be silently bypassed between the read and the write.
+ *
+ * Nothing is deleted: attempts, drawings, check-in data, provider mapping and
+ * notifications all survive. A repeat request on an already-removed row returns
+ * a clear `409` without touching historical data.
+ */
+export async function withdrawFromCompetition(
+  eventId: string,
+  profileId: string,
+): Promise<CompetitionMutationResult<WithdrawalResult>> {
+  if (!eventId || !profileId) {
+    return { ok: false, error: "Event and profile are required", status: 400 };
+  }
+
+  const event = await getCompetitionEvent(eventId);
+  if (!event) {
+    return { ok: false, error: "Competition not found", status: 404 };
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("competition_participants")
+    .select(WITHDRAWAL_SELECT)
+    .eq("event_id", eventId)
+    .eq("profile_id", profileId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("withdrawFromCompetition: participant lookup failed", error);
+    return {
+      ok: false,
+      error: "Failed to unregister from this competition",
+      status: 500,
+    };
+  }
+
+  if (!data) {
+    return {
+      ok: false,
+      error: "You are not registered for this competition.",
+      status: 404,
+    };
+  }
+
+  const row = data as unknown as {
+    id: string;
+    event_id: string;
+    profile_id: string;
+    status: CompetitionParticipantStatus;
+    checked_in_at: string | null;
+    provider_participant_id: string | null;
+    removed_at: string | null;
+    created_at: string;
+  };
+
+  // Event / removal / check-in / provider checks share the pure rule with the
+  // UI. Attempts need a query, so they are checked separately just below.
+  const blockReason = getWithdrawalBlockReason({
+    eventStatus: event.status,
+    removedAt: row.removed_at,
+    checkedInAt: row.checked_in_at,
+    hasAttempts: false,
+    providerMapped: row.provider_participant_id != null,
+  });
+
+  if (blockReason) {
+    return { ok: false, error: blockReason, status: 409 };
+  }
+
+  // Attempts are historical records and are never deleted, so a participant who
+  // has already attempted the challenge can no longer withdraw.
+  const { data: attempts, error: attemptError } = await supabaseAdmin
+    .from("competition_attempts")
+    .select("id")
+    .eq("event_id", eventId)
+    .eq("participant_id", row.id)
+    .limit(1);
+
+  if (attemptError) {
+    console.error("withdrawFromCompetition: attempt lookup failed", attemptError);
+    return {
+      ok: false,
+      error: "Failed to unregister from this competition",
+      status: 500,
+    };
+  }
+
+  if (attempts && (attempts as unknown[]).length > 0) {
+    return {
+      ok: false,
+      error: "You have already started the challenge and can no longer unregister.",
+      status: 409,
+    };
+  }
+
+  const removedAt = new Date().toISOString();
+
+  // Conditional (atomic) soft removal. The DB only performs the update when the
+  // row is STILL eligible, so a concurrent check-in / provider sync / removal
+  // cannot slip past the checks above.
+  const { data: updated, error: updateError } = await supabaseAdmin
+    .from("competition_participants")
+    .update({
+      removed_at: removedAt,
+      removed_by_profile_id: profileId,
+      removal_reason: COMPETITION_SELF_REMOVAL_REASON,
+    })
+    .eq("id", row.id)
+    .eq("event_id", eventId)
+    .eq("profile_id", profileId)
+    .is("removed_at", null)
+    .is("checked_in_at", null)
+    .is("provider_participant_id", null)
+    .select("id, removed_at")
+    .maybeSingle();
+
+  if (updateError) {
+    console.error("withdrawFromCompetition: update failed", updateError);
+    return {
+      ok: false,
+      error: "Failed to unregister from this competition",
+      status: 500,
+    };
+  }
+
+  if (!updated) {
+    // The guard no longer matched: the registration changed between the read and
+    // the write (checked in, provider-synced or already removed).
+    return {
+      ok: false,
+      error: "Your registration has changed. Please refresh and try again.",
+      status: 409,
+    };
+  }
+
+  return {
+    ok: true,
+    data: {
+      participantId: row.id,
+      eventId,
+      removedAt:
+        (updated as unknown as { removed_at: string | null }).removed_at ??
+        removedAt,
+    },
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════

@@ -1,10 +1,12 @@
 import "server-only";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { canManageEvent, getCompetitionEvent } from "@/lib/competition-server";
+import { isActiveParticipant } from "@/lib/competition";
 import {
   generateVerificationToken,
   hashVerificationToken,
 } from "@/lib/competition-join";
+import { getBannedProfileIds } from "@/lib/competition-participant-admin-server";
 import {
   computeParticipantChallengeState,
   getNextAttemptNumber,
@@ -129,7 +131,14 @@ function toSummaries(
   }));
 }
 
-/** Internal participant lookup scoped to a specific event. */
+/**
+ * Internal participant lookup scoped to a specific event.
+ *
+ * T-REM-4: only ACTIVE participants resolve (`removed_at IS NULL`). A
+ * soft-removed participant is therefore treated as not found, so they can never
+ * be verified, checked in, or recorded a new attempt. Historical attempts are
+ * never deleted — this only stops NEW operations.
+ */
 async function getParticipantById(
   eventId: string,
   participantId: string,
@@ -143,13 +152,20 @@ async function getParticipantById(
     )
     .eq("id", participantId)
     .eq("event_id", eventId)
+    // T-REM-4: a removed participant cannot take part in new operations.
+    .is("removed_at", null)
     .maybeSingle();
 
   if (error || !data) return null;
   return data as unknown as CompetitionParticipant;
 }
 
-/** Look up a participant row by (eventId, profileId) - the owner's own row. */
+/**
+ * Look up a participant row by (eventId, profileId) - the owner's own row.
+ *
+ * T-REM-4: only ACTIVE registrations resolve, so a soft-removed participant
+ * cannot mint a new pass/verification token through this path.
+ */
 async function getParticipantByProfile(
   eventId: string,
   profileId: string,
@@ -163,6 +179,8 @@ async function getParticipantByProfile(
     )
     .eq("event_id", eventId)
     .eq("profile_id", profileId)
+    // T-REM-4: a removed participant cannot mint a new pass token.
+    .is("removed_at", null)
     .maybeSingle();
 
   if (error || !data) return null;
@@ -195,6 +213,15 @@ export async function getParticipantChallengeState(
  * List an event's participants joined with profile identity and derived
  * challenge state. Authorized for the event creator OR an assigned ambassador
  * (else []). Only operational data is returned — never account email addresses.
+ *
+ * T-REM-4: this is a MIXED-PURPOSE view and is deliberately NOT filtered by
+ * `removed_at`. It is the operator's management + audit screen, where a removed
+ * participant must remain visible (badged "Removed") so the host can still BAN
+ * them (T-REM-3) and so the participant's history stays explainable. Active
+ * participation is protected at the OPERATION layer instead: `canAttempt` is
+ * forced false for a removed row and every attempt/check-in server path rejects
+ * removed participants. The "active" counts shown above this list exclude
+ * removed participants.
  */
 export async function listCompetitionParticipantsWithState(
   eventId: string,
@@ -209,7 +236,7 @@ export async function listCompetitionParticipantsWithState(
   const { data, error } = await supabaseAdmin
     .from("competition_participants")
     .select(
-      "id, event_id, status, checked_in_at, created_at, verification_code, profile:profiles(full_name)",
+      "id, event_id, profile_id, status, checked_in_at, removed_at, provider_participant_id, created_at, verification_code, profile:profiles!competition_participants_profile_id_fkey(full_name)",
     )
     .eq("event_id", eventId)
     .order("created_at", { ascending: true });
@@ -222,14 +249,21 @@ export async function listCompetitionParticipantsWithState(
   const rows = (data ?? []) as unknown as {
     id: string;
     event_id: string;
+    profile_id: string;
     status: CompetitionParticipantStatus;
     checked_in_at: string | null;
+    removed_at: string | null;
+    provider_participant_id: string | null;
     created_at: string;
     verification_code: string | null;
     profile: { full_name: string | null } | null;
   }[];
 
   const attempts = await getEventAttempts(eventId);
+
+  // T-REM-3: flag banned players for authorized managers. The ban set is looked
+  // up once for the event (never per row) and only a boolean is exposed.
+  const bannedProfileIds = new Set(await getBannedProfileIds(eventId));
   const byParticipant = new Map<string, AttemptSummary[]>();
   for (const attempt of attempts) {
     const list = byParticipant.get(attempt.participant_id) ?? [];
@@ -248,6 +282,10 @@ export async function listCompetitionParticipantsWithState(
       byParticipant.get(row.id) ?? [],
     );
 
+    // T-REM-4: a soft-removed participant is shown for audit/ban purposes but
+    // can never start a NEW attempt, regardless of the derived state.
+    const active = isActiveParticipant({ removed_at: row.removed_at ?? null });
+
     return {
       id: row.id,
       event_id: row.event_id,
@@ -257,13 +295,18 @@ export async function listCompetitionParticipantsWithState(
       // Display name only — never an account id or email.
       profile: row.profile ? { full_name: row.profile.full_name } : null,
       verificationCode: row.verification_code,
+      // T-REM-3: derive the operator-facing removal/ban flags. `profile_id` and
+      // the raw provider id are used ONLY here and never returned to the browser.
+      removedAt: row.removed_at ?? null,
+      banned: bannedProfileIds.has(row.profile_id),
+      providerMapped: row.provider_participant_id != null,
       attemptsUsed: state.attemptsUsed,
       attemptsRemaining: state.attemptsRemaining,
       bestResult: state.bestResult,
       lastResult: state.lastResult,
       passed: state.passed,
       challengeComplete: state.challengeComplete,
-      canAttempt: state.canAttempt,
+      canAttempt: state.canAttempt && active,
     };
   });
 }
@@ -357,8 +400,11 @@ export function normalizeVerificationCode(raw: unknown): string {
   return raw.replace(/[\s-]/g, "").toUpperCase();
 }
 
+// Migration 0026 (T-REM-1) added a second FK from competition_participants to
+// profiles (removed_by_profile_id), so the `profiles` embed needs an explicit FK
+// hint (PostgREST PGRST201 otherwise). The hint pins the participant's OWN profile.
 const VERIFY_SELECT =
-  "id, event_id, profile_id, status, checked_in_at, verification_code, profile:profiles(full_name)";
+  "id, event_id, profile_id, status, checked_in_at, verification_code, profile:profiles!competition_participants_profile_id_fkey(full_name)";
 
 /**
  * Verify a participant by human-readable verification code, scoped to THIS
@@ -391,6 +437,8 @@ export async function verifyCompetitionParticipantByCode(
     .select(VERIFY_SELECT)
     .eq("event_id", eventId)
     .eq("verification_code", code)
+    // T-REM-4: a soft-removed participant cannot check in.
+    .is("removed_at", null)
     .maybeSingle();
 
   if (error) {
@@ -424,6 +472,8 @@ export async function verifyCompetitionParticipantByToken(
     .from("competition_participants")
     .select(VERIFY_SELECT)
     .eq("verification_token_hash", tokenHash)
+    // T-REM-4: a soft-removed participant cannot check in.
+    .is("removed_at", null)
     .maybeSingle();
 
   if (error) {

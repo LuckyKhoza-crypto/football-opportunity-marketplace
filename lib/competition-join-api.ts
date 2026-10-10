@@ -8,6 +8,7 @@ import {
   getCompetitionJoinLinks,
   registerForCompetition,
   revokeCompetitionJoinLink,
+  withdrawFromCompetition,
 } from "@/lib/competition-join-server";
 import { buildCompetitionJoinUrl } from "@/lib/competition-join";
 
@@ -216,6 +217,59 @@ export async function revokeJoinLinkHandler(
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("Join link revoke error:", err);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
+  }
+}
+
+/**
+ * POST /api/competitions/[id]/withdraw
+ *
+ * Player self-unregistration. The caller's identity comes from the NextAuth
+ * session and the registration is looked up by (event id from the route,
+ * authenticated profile id) — the request body is IGNORED, so a caller can never
+ * target another player's registration. All eligibility rules are re-applied
+ * server-side by `withdrawFromCompetition`; a valid registration that cannot be
+ * withdrawn (checked in, attempts recorded, provider-synced, event not active)
+ * returns `409`.
+ */
+export async function withdrawFromCompetitionHandler(
+  _request: Request,
+  eventId: string,
+): Promise<NextResponse> {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { error: "Authentication required" },
+        { status: 401 },
+      );
+    }
+
+    if (!eventId) {
+      return NextResponse.json(
+        { error: "A competition is required" },
+        { status: 400 },
+      );
+    }
+
+    const result = await withdrawFromCompetition(eventId, session.user.id);
+    if (!result.ok) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: result.status },
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      eventId: result.data.eventId,
+      removedAt: result.data.removedAt,
+    });
+  } catch (err) {
+    console.error("Competition withdraw error:", err);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 },
