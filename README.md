@@ -975,9 +975,13 @@ check-ins, notifications and provider mappings are all preserved.
   `start_competition_drawing` RPC is unchanged.
 - **Tournament-provider consistency:** provider-synced participants cannot be removed
   through the FOM flow (removal/ban are refused while `provider_participant_id IS NOT
-  NULL`). A row that is somehow both soft-removed and provider-mapped is detected by
-  `loadEventParticipantRows` and **logged for reconciliation** — FOM preserves the mapping
-  and never silently mutates the external bracket.
+  NULL`). Sync also writes each provider mapping **conditionally on the row still being
+  active** (`removed_at IS NULL`), so a host removing an un-mapped participant while the
+  provider call is in flight can never produce a removed-but-mapped row — the 0-row write
+  surfaces through the existing "confirmed but not mapped" reconciliation failure instead
+  of a false success. A row that is somehow both soft-removed and provider-mapped is
+  detected by `loadEventParticipantRows` and **logged for reconciliation** — FOM preserves
+  the mapping and never silently mutates the external bracket.
 - **Registration / withdrawal unchanged:** registration stays idempotent on the existing
   `UNIQUE(event_id, profile_id)` row (re-registration remains a separate ticket), and
   self-unregistration already filters on `removed_at`. Competition bans (T-REM-3) stay
@@ -2006,7 +2010,7 @@ Team reviews application → PATCH /api/applications/[id] { status: "accepted" }
 | `lib/competition-participant-admin-api.test.ts` | T-REM-3 route handlers: 401/403/400/404/409/200 mapping, session-derived identity (body profile id ignored), trimmed ban reason |
 | `app/competitions/[id]/participants/__tests__/ParticipantManager.test.tsx` | T-REM-3 operator UI: separate Remove/Ban, confirmation for both (explicit ban warning), loading/success/error states, Banned/Removed badges and disabled actions |
 | `lib/competition.test.ts` (T-REM-1) | Active-participant rule: `removed_at IS NULL` → active, non-null (incl. malformed) → removed, missing/`undefined` → active, missing participant → inactive |
-| `lib/competition-server.test.ts` + `lib/competition-management-server.test.ts` + `lib/competition-drawing-server.test.ts` + `lib/competition-attempt-server.test.ts` + `lib/integrations/tournament/service.test.ts` (T-REM-4) | Active-participant filtering: the management list & statistics, and drawing eligibility, apply `.is("removed_at", null)`; check-in (code + QR), attempt recording and pass-token minting reject a removed participant (`404`); the operator list keeps removed rows for audit/ban but forces `canAttempt=false`; tournament sync requests only active participants; a removed-but-provider-mapped bracket participant is preserved untouched and logged for reconciliation |
+| `lib/competition-server.test.ts` + `lib/competition-management-server.test.ts` + `lib/competition-drawing-server.test.ts` + `lib/competition-attempt-server.test.ts` + `lib/integrations/tournament/service.test.ts` (T-REM-4) | Active-participant filtering: the management list & statistics, and drawing eligibility, apply `.is("removed_at", null)`; check-in (code + QR), attempt recording and pass-token minting reject a removed participant (`404`); the operator list keeps removed rows for audit/ban but forces `canAttempt=false`; tournament sync requests only active participants and its mapping write is conditional on `removed_at IS NULL` (a concurrent removal surfaces as a reconciliation failure); a removed-but-provider-mapped bracket participant is preserved untouched and logged for reconciliation |
 | `lib/matching/*.test.ts` | Matching engine: engine, applications, mvp014, player-experience, team-applications |
 | `app/api/**/__tests__/` | API routes: applications (acceptance, withdrawal), messages, notifications, outreach, team invites, team join, competitions (create + event/ambassador handlers) |
 | `app/homepage.test.ts` | Homepage rendering |

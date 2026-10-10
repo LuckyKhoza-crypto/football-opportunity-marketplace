@@ -487,8 +487,8 @@ describe("TOURN-001: addEventParticipantsToTournament", () => {
       data: [participantRow(), participantRow({ id: "p2", profile: null })],
       error: null,
     });
-    const mappingOne = mockFromOnce({ data: null, error: null });
-    const mappingTwo = mockFromOnce({ data: null, error: null });
+    const mappingOne = mockFromOnce({ data: [{ id: "p1" }], error: null });
+    const mappingTwo = mockFromOnce({ data: [{ id: "p2" }], error: null });
 
     const result = await addEventParticipantsToTournament(
       EVENT_A,
@@ -504,6 +504,8 @@ describe("TOURN-001: addEventParticipantsToTournament", () => {
       provider_participant_id: "11",
     });
     expect(mappingOne.eq).toHaveBeenCalledWith("id", "p1");
+    // T-REM-4: the mapping write only lands on an ACTIVE participant row.
+    expect(mappingOne.is).toHaveBeenCalledWith("removed_at", null);
     expect(mappingTwo.update).toHaveBeenCalledWith({
       provider_participant_id: "12",
     });
@@ -528,7 +530,7 @@ describe("TOURN-001: addEventParticipantsToTournament", () => {
       data: [participantRow()],
       error: null,
     });
-    mockFromOnce({ data: null, error: null }); // mapping write
+    mockFromOnce({ data: [{ id: "p1" }], error: null }); // mapping write
 
     const result = await addEventParticipantsToTournament(
       EVENT_A,
@@ -540,6 +542,31 @@ describe("TOURN-001: addEventParticipantsToTournament", () => {
       { ref: "p1", displayName: "Alex Mokoena" },
     ]);
     expect(result.ok).toBe(true);
+  });
+
+  it("T-REM-4: a concurrent removal prevents the mapping and reports reconciliation", async () => {
+    const provider = fakeProvider({
+      addParticipants: vi
+        .fn()
+        .mockResolvedValue([{ ref: "p1", providerParticipantId: "11" }]),
+    });
+    vi.mocked(resolveTournamentProvider).mockReturnValue(provider);
+
+    mockFromOnce({ data: linkedEventRow(), error: null });
+    mockFromOnce({ data: [participantRow()], error: null });
+    // The participant was removed after the provider call, so the conditional
+    // (`removed_at IS NULL`) mapping write matches 0 rows.
+    const mappingBuilder = mockFromOnce({ data: [], error: null });
+
+    const result = await addEventParticipantsToTournament(
+      EVENT_A,
+      PROFILE_MANAGER,
+    );
+
+    expect(mappingBuilder.is).toHaveBeenCalledWith("removed_at", null);
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.status).toBe(500);
+    expect(result.ok === false && result.error).toMatch(/reconcile/i);
   });
 
   it("skips participants that are already mapped and never calls the provider", async () => {

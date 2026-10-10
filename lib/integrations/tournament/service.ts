@@ -508,22 +508,35 @@ function providerToFomParticipantIds(
   return byProviderId;
 }
 
-/** Persist one participant's provider id. */
+/**
+ * Persist one participant's provider id.
+ *
+ * T-REM-4: the write is conditional on the participant still being ACTIVE
+ * (`removed_at IS NULL`). This closes the narrow race where a host removes an
+ * un-mapped participant while the provider call is in flight: the mapping is
+ * never written, so FOM cannot create a removed-but-mapped inconsistency. The
+ * external bracket already holds the participant, so the 0-row update surfaces
+ * through the caller's existing "confirmed but not mapped" reconciliation
+ * failure instead of reporting a false success.
+ */
 async function saveParticipantMapping(
   participantId: string,
   providerParticipantId: string,
 ): Promise<boolean> {
-  const { error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from("competition_participants")
     .update({ provider_participant_id: providerParticipantId })
-    .eq("id", participantId);
+    .eq("id", participantId)
+    .is("removed_at", null)
+    .select("id");
 
   if (error) {
     console.error("saveParticipantMapping: update failed", error);
     return false;
   }
 
-  return true;
+  // A 0-row update means the participant was removed concurrently.
+  return Array.isArray(data) && data.length > 0;
 }
 
 /**
