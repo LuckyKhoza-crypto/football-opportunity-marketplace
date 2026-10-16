@@ -190,11 +190,17 @@ football-opportunity-marketplace/
 │   │   ├── templates/fom-email-shell.ts  # Email-safe HTML shell + text fallback
 │   │   ├── templates/outreach-message.ts # EMAIL-003 "team contacted you" email
 │   │   ├── templates/application-status.ts # EMAIL-004 application status email
+│   │   ├── templates/competition-registration.ts # COMP-EMAIL-001 registration confirmation + QR
+│   │   ├── templates/competition-participant-message.ts # T-BULK-1 host/ambassador reminder email
 │   │   └── index.ts              # Barrel export
+│   ├── competition-bulk-email.ts          # T-BULK-1 pure policy (validation, audience, escaping)
+│   ├── competition-bulk-email-server.ts   # T-BULK-1 authorized audience/preview/send/batch helpers
+│   ├── competition-bulk-email-delivery.ts # T-BULK-1 bounded outbox processor (one message/recipient)
+│   ├── competition-bulk-email-api.ts      # T-BULK-1 route handlers
 │   ├── colors.ts                 # Centralized color tokens
 │   └── utils.ts                  # shadcn cn() helper
 │
-├── supabase/migrations/          # 27 SQL migrations (see Database Schema)
+├── supabase/migrations/          # 29 SQL migrations (see Database Schema)
 ├── types/index.ts                # All shared TypeScript types + option constants
 ├── public/images/                # Static images
 ├── app_roadmap.md                # MVP-004 → MVP-022 tickets
@@ -256,6 +262,8 @@ All tables have RLS enabled. The application uses `supabaseAdmin` (service role)
 | `competition_events` | Competition events (COMP-001) | `name`, `description`, `location`, `event_date TIMESTAMPTZ`, `status` (`draft`/`active`/`drawing`/`completed`/`cancelled`), `challenge_name`, `challenge_threshold`, `max_attempts`, `created_by` (FK profiles, authoritative manager), `provider` + `provider_tournament_id` + `tournament_format` (TOURN-001/002A — nullable external tournament mapping plus the FOM format it was created with; the provider columns are set together by a CHECK, and `tournament_format` is set in the same UPDATE as the mapping, backfilled to `single_elimination` for tournaments created before TOURN-002A) |
 | `competition_participants` | A profile's participation in an event (COMP-001) | `event_id` (FK competition_events), `profile_id` (FK **profiles** — NOT player_profiles), `status` (`registered`/`challenge_pending`/`qualified`/`not_qualified`), `checked_in_at`, `provider_participant_id` (TOURN-001 — nullable provider participant mapping), `removed_at` / `removed_by_profile_id` (FK profiles, `ON DELETE SET NULL`) / `removal_reason` (T-REM-1 — nullable **soft-removal**; `removed_at IS NULL` = active, a non-null value = removed without deleting the row; T-REM-3 writes `host_removal` for a host removal and `host_ban` when a ban also removes the registration), UNIQUE(`event_id`, `profile_id`) |
 | `competition_bans` | **T-REM-3** durable, competition-specific ban | `event_id` (FK competition_events, `ON DELETE CASCADE`), `profile_id` (FK profiles, `ON DELETE CASCADE` — the banned player), `banned_at TIMESTAMPTZ NOT NULL DEFAULT now()`, `banned_by_profile_id` (FK profiles, `ON DELETE SET NULL` — the acting manager), `reason` (nullable operator note), UNIQUE(`event_id`, `profile_id`). A ban prevents **re-registration for that competition only** (never a global account ban) and is checked server-side before any registration is created. |
+| `competition_bulk_emails` | **T-BULK-1** one host/ambassador "Email Participants" batch | `event_id` (FK competition_events, `ON DELETE CASCADE`), `sent_by_profile_id` (FK profiles, `ON DELETE SET NULL` — the authorized actor), `request_id` (idempotency key), `subject`, `body_text` (the host's message, stored once), `eligible_count` / `invalid_count` / `duplicate_count` (server-observed audience snapshot, all `>= 0`), UNIQUE(`event_id`, `request_id`). The batch id itself is always server-generated. |
+| `competition_bulk_email_recipients` | **T-BULK-1** the per-recipient delivery outbox (ONE row per individual message) | `batch_id` (FK competition_bulk_emails, `ON DELETE CASCADE`), `profile_id` (FK profiles, `ON DELETE SET NULL`), `recipient_email` (normalized at enqueue — never returned to a client), `recipient_name`, `status` (`pending`/`sending`/`sent`/`failed`), `attempts`, `available_at` (retry backoff), `sent_at`, `last_error` (sanitized), `provider_message_id` (Brevo message id), UNIQUE(`batch_id`, `recipient_email`). `sent` means the provider **accepted** the message — never an inbox-delivery claim. |
 | `competition_ambassadors` | Competition-specific ambassador authorization (COMP-001) | `event_id` (FK competition_events), `profile_id` (FK profiles), UNIQUE(`event_id`, `profile_id`). **Never derived from `profiles.role`.** |
 | `competition_join_links` | Reusable ambassador join links / QR codes (COMP-003) | `event_id` (FK competition_events), `ambassador_id` (FK **competition_ambassadors** — the link owner is the ambassador relation, not a profile), `token_hash` (SHA-256 of the raw token, UNIQUE), `revoked_at`. The raw token is never stored. |
 | `competition_attempts` | One physical challenge attempt per row (COMP-004) | `event_id` (FK competition_events), `participant_id` (FK competition_participants), `attempt_number` (server-assigned, 1-based), `result_value NUMERIC` (generic — no unit baked in), `passed` (server-computed), `recorded_by_profile_id` (FK profiles), UNIQUE(`participant_id`, `attempt_number`). A `BEFORE INSERT` trigger rejects cross-event participants and attempts beyond the event's `max_attempts`. |
@@ -280,7 +288,8 @@ These perform atomic multi-table operations. The API layer calls them via `supab
 | `update_outreach_status` | Players can accept/decline; teams can withdraw. Validates current state. |
 | `accept_team_invite` | Atomically creates a `team_memberships` row for a player accepting a shared invite link. Locks the invite row (`FOR UPDATE`), rejects revoked/expired, rejects players already on a different team, idempotent for same team. |
 | `accept_application` | Atomically transitions an application to `accepted` AND creates/updates the player's `team_memberships` row. The **opportunity** is the authoritative source for team/position/role (never client-provided values). Idempotent for already-accepted. |
-| `start_competition_drawing` | **COMP-006.** Runs the competition drawing in one transaction: locks the event row (`FOR UPDATE`), authorizes creator **or** assigned ambassador, rejects an existing drawing (`DRAWING_ALREADY_EXISTS`) and non-drawable states (`EVENT_NOT_DRAWABLE`), counts the **qualified** participants (`NO_QUALIFIED_PARTICIPANTS` when zero), selects exactly one at random (`ORDER BY random() LIMIT 1`), inserts `competition_drawings` and moves the event to `completed`. Returns a machine-readable JSONB summary. The browser never selects the winner or the count. |
+| `start_competition_drawing` | **COMP-006 + T-REM-4.** Runs the competition drawing in one transaction: locks the event row (`FOR UPDATE`), authorizes creator **or** assigned ambassador, rejects an existing drawing (`DRAWING_ALREADY_EXISTS`) and non-drawable states (`EVENT_NOT_DRAWABLE`), counts the **active** qualified participants — `status = 'qualified' AND removed_at IS NULL` (`NO_QUALIFIED_PARTICIPANTS` when zero), selects exactly one at random (`ORDER BY random() LIMIT 1` over the same active set), inserts `competition_drawings` and moves the event to `completed`. Returns a machine-readable JSONB summary. The browser never selects the winner or the count, and a soft-removed participant can never be selected. |
+| `claim_next_bulk_email_recipient` | **T-BULK-1.** Atomically claims ONE `pending` recipient of a bulk-email batch (`competition_bulk_email_recipients`) with `FOR UPDATE SKIP LOCKED`, flips it to `sending` and increments `attempts` in the same transaction; also recovers rows stranded in `sending` by a crashed worker (stale timeout). Bounded by `p_max_attempts`. `SECURITY DEFINER`, service-role only. Mirrors EMAIL-002's `claim_next_email_delivery`, scoped to one batch, so overlapping or repeated processing can never send the same message twice. |
 
 ### RLS Notes
 
@@ -299,6 +308,7 @@ These perform atomic multi-table operations. The API layer calls them via `supab
 - `competition_ambassadors` (COMP-001): only the event creator can create/delete ambassador relationships (prevents arbitrary users authorizing themselves or others); creator and the ambassador can read.
 - `competition_attempts` (COMP-004): the event creator, an assigned ambassador, and the owning participant can read; there is **no client INSERT/UPDATE/DELETE** — every write goes through the service-role server helpers, which authorize the creator **or** an assigned ambassador.
 - `competition_drawings` (COMP-006): the event creator and an assigned ambassador can read; there is **no client INSERT/UPDATE/DELETE** — the only write path is the `start_competition_drawing` SECURITY DEFINER RPC. The drawing is immutable once created.
+- `competition_bulk_emails` / `competition_bulk_email_recipients` (T-BULK-1): RLS is enabled with **no policies at all**, so no client (anon or authenticated) can read or write them. Recipient **email addresses** and provider state live only behind the server-side service-role client, after `canManageEvent` has been re-checked in TypeScript.
 
 ---
 
@@ -442,7 +452,7 @@ competitions are built on `profiles` + the auth session only.
 |---|---|---|
 | `/competitions` | `app/competitions/page.tsx` | Management page: competitions created by the current profile + events they are an ambassador for. The **Create Competition** action is shown only to the competition-creation admin (COMP-007). |
 | `/competitions/new` | `app/competitions/new/page.tsx` | Create a competition event (starts in `draft`). **COMP-007:** server-guarded — only the profile whose id equals `MULTI_TEAM_ADMIN_USER_ID` may render it; anyone else gets a `404`. |
-| `/competitions/[id]` | `app/competitions/[id]/page.tsx` | Role-aware management page. Both creator and ambassador see event details, stats, the "Run Competition" (participant operations) entry point and the **Tournament panel** (TOURN-002/003: create → sync participants → start → report results → finalize → winner); only the creator additionally sees edit/lifecycle/ambassadors/join links. |
+| `/competitions/[id]` | `app/competitions/[id]/page.tsx` | Role-aware management page. Both creator and ambassador see event details, stats, the "Run Competition" (participant operations) entry point, the **Email Participants** panel (T-BULK-1: recipient count → compose → preview → confirm → outcome summary) and the **Tournament panel** (TOURN-002/003: create → sync participants → start → report results → finalize → winner); only the creator additionally sees edit/lifecycle/ambassadors/join links. |
 | `/competitions/[id]/edit` | `app/competitions/[id]/edit/page.tsx` | Edit event configuration (creator only; server-verified). |
 
 ### Public Competition Results (COMP-007)
@@ -596,6 +606,11 @@ All API routes verify auth via `getServerSession(authOptions)` and use `supabase
 | `/api/competitions/[id]/draw` | GET | COMP-006. Return the drawing result (winner name, eligible count, timestamp — never database ids) if one exists. Creator **or** assigned ambassador only; an unrelated user gets an opaque `404`. |
 | `/api/competitions/[id]/draw` | POST | COMP-006. **Start the drawing.** The request body is ignored — the winner is selected server-side by the `start_competition_drawing` RPC and the eligible count is calculated server-side. Creator **or** assigned ambassador. No qualified participants → `409`; a second drawing → `409`. |
 | `/api/competitions/[id]/tournament` | POST | TOURN-002. **Create/link the external tournament.** Body ignored (provider, format, slug, name resolved server-side). Creator **or** assigned ambassador. Already linked → `409`. Returns the tournament's neutral status (`201`). |
+| `/api/competitions/[id]/emails` | GET | **T-BULK-1.** The CURRENT reminder-email audience summary (`activeCount` / `eligibleCount` / `invalidCount` / `duplicateCount` — **counts only**, never addresses) plus the event's recent send batches. Creator **or** assigned ambassador. Unauthenticated → `401`; unauthorized → `403`. |
+| `/api/competitions/[id]/emails` | POST | **T-BULK-1. Send a reminder to every active registered participant.** Body carries ONLY `{ subject, message, requestId }` — a client-supplied recipient list/count is impossible: the audience is re-resolved server-side at send time and the actor comes from the session. Queues one message **per recipient** (deduplicated, normalized, invalid addresses skipped) and schedules the first bounded delivery attempt after the response. `400` invalid subject/message/request id, `401`, `403`, `404` unknown event, `503` email not configured. A repeated `requestId` returns the existing batch and sends nothing new. |
+| `/api/competitions/[id]/emails/preview` | POST | **T-BULK-1.** Server-rendered preview (HTML + plain text) of exactly what one recipient will receive, built by the SAME template the processor uses, plus the current audience count. Sends and stores nothing. Creator **or** assigned ambassador; `400` invalid input. |
+| `/api/competitions/[id]/emails/[batchId]` | GET | **T-BULK-1.** The recorded outcome summary of one batch (eligible / accepted by the provider / failed / still pending). The batch must belong to the competition in the route. Never returns an address. Creator **or** assigned ambassador; `404` unknown or foreign batch. |
+| `/api/competitions/[id]/emails/[batchId]/process` | POST | **T-BULK-1.** Continues (or safely retries) a batch by sending its REMAINING `pending` recipients — bounded per request, one message each. Already-accepted and permanently failed recipients are never re-sent. Creator **or** assigned ambassador; `404` unknown or foreign batch. |
 | `/api/competitions/[id]/tournament` | GET | TOURN-002. Tournament status (state, completeness, open matches, champion participant id). `409` + `code: "not_linked"` means the competition has no tournament yet — a state, not an error. Creator **or** assigned ambassador. |
 | `/api/competitions/[id]/tournament/participants` | POST | TOURN-002. **Sync participants**: pushes registered participants that are not yet mapped and stores the returned provider ids (existing service, idempotent). Responds with counts only — `{ synced, alreadyMapped, total }`, never provider ids. Creator **or** assigned ambassador. |
 | `/api/competitions/[id]/tournament/start` | POST | TOURN-002. **Start the tournament** (generates the bracket). Idempotent (`started: false` when already started); completed/unrecognised provider state → `409`. No bracket state is copied into Supabase. Creator **or** assigned ambassador. |
@@ -970,9 +985,16 @@ check-ins, notifications and provider mappings are all preserved.
     every existing provider mapping and completed bracket participant stays resolvable.
 - **Drawing:** the normal lifecycle already makes this impossible (removal requires an
   event with **no** attempts and no check-in, while qualification requires a passing
-  attempt), but the explicit `removed_at IS NULL` filter on `getQualifiedParticipantCount`
-  makes the rule authoritative in the query anyway. The atomic
-  `start_competition_drawing` RPC is unchanged.
+  attempt), and the explicit `removed_at IS NULL` filter on `getQualifiedParticipantCount`
+  makes the rule authoritative in the query. **T-REM-4 (remainder):** the authoritative
+  database-side selection is now fixed too — migration
+  `0029_competition_drawing_active_eligibility.sql` replaces
+  `start_competition_drawing` with the same signature/return shape but adds
+  `AND removed_at IS NULL` to **both** the eligibility count and the
+  `ORDER BY random() LIMIT 1` winner selection, so a soft-removed qualified participant
+  can never be selected by a NEW drawing regardless of any application pre-check. Locking,
+  authorization, the one-drawing-per-event rule, the `NO_QUALIFIED_PARTICIPANTS` outcome
+  and historical drawings (attempts/results are never touched) are unchanged.
 - **Tournament-provider consistency:** provider-synced participants cannot be removed
   through the FOM flow (removal/ban are refused while `provider_participant_id IS NOT
   NULL`). Sync also writes each provider mapping **conditionally on the row still being
@@ -1003,9 +1025,84 @@ cancelled (terminal)
 scope for COMP-002**. The transition map is the single, extensible place to change this if
 a later ticket (e.g. COMP-007) must own `drawing → completed`.
 
-### Authorization rules
+### Host/Ambassador reminder email to all participants (T-BULK-1)
 
-| Capability | Event creator | Ambassador | Other user |
+An authorized competition **host** or assigned **ambassador** can email every ACTIVE
+registered participant of one competition ("Email Participants") — arrival instructions,
+kickoff time, venue details, what to bring. Recipients are resolved **server-side**; the
+sender never enters an address, and each participant receives their **own** message.
+
+- **UI entry point:** the `EmailParticipantsPanel` card on
+  `/competitions/[id]` (the competition management page), shown to the event creator and
+  to assigned ambassadors. Compose → `Preview email` → explicit confirmation →
+  outcome summary. The panel is fed server-resolved props
+  (`initialAudience`, `initialBatches`) exactly like the other management panels.
+- **Audience (server-authoritative):** `competition_participants` rows of the event with
+  `removed_at IS NULL` (T-REM-1/T-REM-4 active rule), joined to the EXISTING
+  `profiles` relationship (`competition_participants_profile_id_fkey` → `profiles.email`,
+  the canonical address — never `auth.users` or `player_profiles`). Withdrawn/host-removed
+  participants are excluded; **checked-in and not-yet-checked-in participants are both
+  included** (this is a reminder, not bracket synchronization). Addresses are normalized
+  (trim + lowercase), deduplicated, and missing/invalid addresses are skipped with their
+  counts reported. The audience is **re-resolved at send time** — a client-supplied
+  recipient list or count is impossible (the request body carries only `subject`,
+  `message` and an idempotency `requestId`).
+- **Authorization:** the shared `canManageEvent` rule (creator **or** assigned ambassador,
+  never `profiles.role`), re-checked on the audience read, the preview, the send, the batch
+  read and the drain action. The acting profile id always comes from the NextAuth session.
+- **Privacy:** one recipient per message via the EMAIL-001 Brevo transport (never a shared
+  `To`/`CC` list). Recipient addresses live only in the server-only outbox tables (RLS with
+  **no client policies**) and are never returned by an API response, never logged, and
+  never rendered as copy in the email.
+- **Content safety:** subject ≤ 150 chars with no CR/LF (header-injection guard), message
+  ≤ 5000 chars. The message is treated as untrusted plain text and HTML-escaped into
+  paragraphs by `messageToHtml` — arbitrary HTML/links can never be injected. The email
+  uses the existing FOM Sports shell (`buildFomEmailShell`) and appends only event details
+  read from `competition_events` (date/location/challenge, omitted when absent — never
+  invented).
+- **Delivery architecture (`BulkEmailService` equivalent):** a bounded, durable outbox in
+  PostgreSQL — **no new dependency and no job platform**:
+  - `competition_bulk_emails` (one batch: event, sender, idempotency `request_id`, stored
+    subject/body, audience snapshot counts) with `UNIQUE(event_id, request_id)`.
+  - `competition_bulk_email_recipients` (one row per individual message: normalized
+    address, optional name, `status` `pending → sending → sent | failed`, `attempts`,
+    `available_at`, `sent_at`, `last_error`, `provider_message_id`) with
+    `UNIQUE(batch_id, recipient_email)`.
+  - `claim_next_bulk_email_recipient(batch_id, stale_seconds, max_attempts)`
+    (`SECURITY DEFINER`, `FOR UPDATE SKIP LOCKED`, service-role only) — the same
+    concurrency-safe claim/stale-recovery model as EMAIL-002's
+    `claim_next_email_delivery`, scoped to one batch. Overlapping or repeated invocations
+    therefore **cannot** send the same message twice.
+  - `processBulkEmailBatch()` sends **sequentially**, at most
+    `BULK_EMAIL_PROCESS_LIMIT` (`25`) messages per invocation, so a large audience is never
+    one huge synchronous request and provider rate limits are respected. The first attempt
+    is scheduled after the response via Next.js `after()`; the panel then drains the
+    remaining pending recipients with bounded `POST …/emails/[batchId]/process` calls
+    (progress is visible).
+  - Retries use the shared exponential backoff (60s → 120s → 240s …, capped at 6h) and a
+    hard cap of `BULK_EMAIL_MAX_ATTEMPTS` (`5`). Retryable failures (network, HTTP 429 rate
+    limits, 5xx, missing configuration) are rescheduled; permanent provider rejections are
+    marked `failed` immediately. Failures are recorded **per recipient** — a partially
+    failed batch is never presented or retried as a whole, and only `pending` rows are ever
+    re-attempted.
+  - `sent` means the provider **accepted** the message (a Brevo message id was returned).
+    The UI says "Accepted by the provider", never "delivered".
+  - **Idempotency:** the composing screen sends a per-compose-session `requestId` (a UUID).
+    A repeat click or request retry returns the existing batch instead of queueing a second
+    send; the batch id itself is always server-generated. In-flight submission is disabled.
+- **Outcome reporting:** eligible recipients, accepted by the provider, failed, and still
+  pending — all from the recorded per-recipient results (plus the skipped
+  invalid/duplicate counts from the enqueue snapshot).
+- **API:** `GET|POST /api/competitions/[id]/emails`,
+  `POST /api/competitions/[id]/emails/preview`,
+  `GET /api/competitions/[id]/emails/[batchId]`,
+  `POST /api/competitions/[id]/emails/[batchId]/process` (creator **or** assigned
+  ambassador; `401` unauthenticated, `403` unauthorized, `400` validation,
+  `404` unknown batch/foreign competition, `503` email not configured).
+- **Scope:** this reminder email only. No scheduled/campaign email, no re-registration, no
+  automatic event-change or tournament-placement emails.
+
+### Authorization rules
 |---|---|---|---|
 | View event / stats | ✅ | ✅ | ❌ |
 | Edit event configuration | ✅ | ❌ | ❌ |
@@ -1605,6 +1702,14 @@ marketplace event ─► createNotification() ─► notifications row (canonica
 | `supabase/migrations/0022_notification_data.sql` | EMAIL-003 adds a nullable `notifications.data` JSONB column (JSON-object CHECK) for non-sensitive typed presentation metadata — RLS/indexes/realtime untouched |
 | `supabase/migrations/0025_competition_registration_notification.sql` | COMP-EMAIL-001 widens the `notifications.type` CHECK to allow `competition_registration_confirmed` and adds its per-participant dedup partial unique index. The type is deliberately **not** email-enabled (the confirmation email's QR is built in memory; see below). No token/QR/email payload is persisted. |
 | `supabase/migrations/0026_competition_participant_removal.sql` | T-REM-1 soft-removal foundation: adds nullable `removed_at`, `removed_by_profile_id` (FK `profiles(id)` `ON DELETE SET NULL`) and `removal_reason` to `competition_participants`. **Additive only** — no backfill/delete, no new registration value, no new index, and no change to the unique constraint, foreign keys, RLS, triggers or realtime. |
+| `lib/email/templates/competition-participant-message.ts` | T-BULK-1 host/ambassador reminder email: `buildCompetitionParticipantMessageEmail()` — competition name, the host's escaped plain-text message as paragraphs, and only the VERIFIED event details (date/location/challenge, omitted when absent). ONE recipient per message; never a visible recipient list. |
+| `lib/competition-bulk-email.ts` | T-BULK-1 pure policy (client + server): `validateBulkEmailInput` (required, length caps, no CR/LF subject), `normalizeRecipientEmail` / `isDeliverableRecipientEmail`, `resolveBulkEmailAudience` (the `removed_at IS NULL` active rule + dedupe + invalid/duplicate counts) and `messageToHtml` (escaped plain text → paragraphs). |
+| `lib/competition-bulk-email-server.ts` | T-BULK-1 server helpers (`server-only`): `getCompetitionBulkEmailAudience`, `previewCompetitionBulkEmail`, `sendCompetitionBulkEmail` (idempotent enqueue), `getCompetitionBulkEmailBatch`, `listCompetitionBulkEmailBatches`, `processCompetitionBulkEmailBatch`. Every entry point re-checks `canManageEvent` and re-resolves the audience from the database. |
+| `lib/competition-bulk-email-delivery.ts` | T-BULK-1 delivery: `processBulkEmailBatch()` (atomic claim, ONE message per recipient, bounded/sequential, bounded retries + backoff, per-recipient outcomes), `processBulkEmailBatchForEvent()` (cross-competition guard) and `scheduleBulkEmailProcessing()` (best-effort first attempt via Next.js `after()`). `server-only`. |
+| `lib/competition-bulk-email-api.ts` | T-BULK-1 route handlers: session-derived identity, body validation, discriminated-result → HTTP status mapping. |
+| `app/competitions/[id]/EmailParticipantsPanel.tsx` | T-BULK-1 UI: recipient count, compose, server-built preview, explicit confirmation, in-flight disabling and the outcome summary (accepted/failed/pending) with a safe "Send remaining". |
+| `supabase/migrations/0029_competition_drawing_active_eligibility.sql` | **T-REM-4 (remainder).** Additive `CREATE OR REPLACE FUNCTION start_competition_drawing` adding `removed_at IS NULL` to BOTH the eligibility count and the winner selection. Signature, permissions, return shape, `FOR UPDATE` locking, authorization, one-drawing-per-event rule, `NO_QUALIFIED_PARTICIPANTS` outcome and historical data are all unchanged. |
+| `supabase/migrations/0028_competition_bulk_email.sql` | **T-BULK-1** bulk-email outbox: `competition_bulk_emails` (+ `UNIQUE(event_id, request_id)` idempotency), `competition_bulk_email_recipients` (+ `UNIQUE(batch_id, recipient_email)`), FK/worker indexes, `updated_at` triggers, RLS with **no** policies, and the `claim_next_bulk_email_recipient` SECURITY DEFINER claim RPC (service-role only). Additive only. |
 | `supabase/migrations/0027_competition_participant_bans.sql` | **T-REM-3** durable, competition-specific bans: creates `competition_bans` (`event_id`/`profile_id` FKs, `banned_at`, `banned_by_profile_id` FK `ON DELETE SET NULL`, `reason`, UNIQUE(`event_id`, `profile_id`), FK indexes), enables RLS with manager/ambassador **SELECT-only** policies (no client write path) and adds the atomic `SECURITY DEFINER` RPC `remove_competition_participant` (row lock `FOR UPDATE`, shared creator-or-ambassador auth, the same lifecycle/provider checks as T-REM-2, soft removal, `ON CONFLICT … DO NOTHING` ban). Additive only — creates a new table + function; never drops/relaxes the existing `competition_participants` UNIQUE(`event_id`, `profile_id`) constraint. |
 
 ### Scope (EMAIL-001 / EMAIL-002)
@@ -1862,6 +1967,16 @@ curl -X POST "https://<host>/api/email/deliveries/process" \
 - `last_error` stores a short, sanitised reason only — never API keys, auth
   headers or raw provider payloads.
 
+**This processor is for notification emails only.** The T-BULK-1 competition
+reminder emails use their OWN outbox (`competition_bulk_emails` +
+`competition_bulk_email_recipients`, migration `0028`) and their own processor
+(`processBulkEmailBatch()`), because a bulk host message is not a notification and
+has many independent recipients. Both reuse the SAME Brevo transport
+(`sendTransactionalEmail`), the same safe error sanitisation and the same
+backoff/claim semantics. Bulk batches are drained by a best-effort `after()`
+attempt at send time plus the authorized "Send remaining" action in the panel —
+no new scheduler or job platform is introduced.
+
 ---
 
 ## Team Context & Multi-Team
@@ -1974,6 +2089,13 @@ Team reviews application → PATCH /api/applications/[id] { status: "accepted" }
 | `lib/competition-drawing-server.test.ts` | COMP-006 server: qualified count, creator/ambassador authorization (allowed + denied), server-side RPC selection, error mapping (already-drawn/no-qualified/not-drawable), display-safe result, no client-supplied winner/count |
 | `lib/competition-drawing-api.test.ts` | COMP-006 API handlers: auth, server-selected result mapped to 201, ignored client body, duplicate/no-qualified → 409, opaque 404 for private drawing reads |
 | `lib/competition-drawing-migration.test.ts` | COMP-006 migration (0020): table/RPC/unique-index/RLS shape, server-side random selection, one-drawing-per-event, immutability, no edits to prior migrations |
+| `lib/competition-drawing-eligibility-migration.test.ts` | **T-REM-4 (remainder)** migration (0029): the additive `CREATE OR REPLACE FUNCTION` keeps the signature/return shape, applies `removed_at IS NULL` to BOTH the eligibility count and the winner selection, preserves `FOR UPDATE`/authorization/one-drawing-per-event/`NO_QUALIFIED_PARTICIPANTS`/`unique_violation`, writes no history, and left the already-applied `0020` untouched |
+| `lib/competition-bulk-email.test.ts` | T-BULK-1 pure policy: subject/message validation (required, length caps, CR/LF rejection), address normalization/validation (agrees with the EMAIL-001 validator), audience resolution (active only, removed excluded, invalid skipped, duplicates deduped with counts), HTML escaping/paragraphing and batch-state derivation |
+| `lib/competition-bulk-email-server.test.ts` | T-BULK-1 server: creator/ambassador authorization for the audience, preview, send, batch read/list and drain; `removed_at IS NULL` in the query; counts only (no address in any result); validation/authorization failures send nothing; enqueue shape + dedupe/invalid counts; idempotent repeat + concurrent-duplicate insert; batch rollback on partial enqueue; email-unconfigured `503`; batch↔event binding |
+| `lib/competition-bulk-email-delivery.test.ts` | T-BULK-1 delivery: ONE message per recipient, sequential/bounded sends, no duplicate sends on re-invocation, atomic claim args, permanent vs retryable classification, 429/rate-limit reschedule with backoff, attempts exhaustion, per-recipient partial failure, invalid stored address, RPC failure, secret redaction, no address logging, cross-competition guard and `after()` scheduling/`no-op` safety |
+| `lib/competition-bulk-email-api.test.ts` | T-BULK-1 route handlers: `401` unauthenticated, `403` pass-through, `400` validation, `201` send, batch read/drain mapping, session-derived identity (body identity/recipients ignored) and `500` on an unexpected failure |
+| `lib/competition-bulk-email-migration.test.ts` | T-BULK-1 migration (0028): batch/recipient tables + constraints, idempotency unique key, worker/FK indexes, `updated_at` triggers, RLS with no policies, the atomic claim RPC and its service-role grant, and additivity (nothing existing dropped/relaxed) |
+| `app/competitions/[id]/__tests__/EmailParticipantsPanel.test.tsx` | T-BULK-1 UI: server-resolved recipient count (and skipped-count copy with no addresses), disabled send until composed, server preview, required confirmation, in-flight disabling with exactly one send request, outcome summary (accepted/failed/pending + "not an inbox confirmation"), auto-drain of the remainder, "Send remaining" retry, and error surfacing |
 | `lib/competition-public-server.test.ts` | COMP-007 public results: no-auth access, qualified-only participants, persisted winner (and no winner before drawing), player-profile linking (and safe non-linking), public-safe field projection and privacy |
 | `lib/competition-creation-auth.test.ts` | COMP-007 creation restriction: `isCompetitionCreationAdmin` (admin/ambassador/player/missing env), `createCompetitionEvent` allows only the admin and fails closed |
 | `lib/integrations/tournament/contract.test.ts` | TOURN-001/002A/003 pure contract: modelled formats, default format, completion, match-score validation, participant display-name fallback, `toTournamentConfig` narrowing (default / valid / rejected — never converted), and TOURN-003 match references (composition from the provider's round + FOM participant ids, `null` for an undecided/unmapped side, and narrowing that rejects provider-shaped ids) |
@@ -2076,7 +2198,8 @@ npm test          # Vitest
 - ✅ Tournament management workflow (TOURN-002 — the first usable tournament workflow on top of the TOURN-001 provider abstraction: create/link a competition's external tournament, sync the registered participants, start it, and view a **read-only, provider-neutral** bracket on the existing competition page (`/competitions/[id]`). Thin App Router routes under `app/api/competitions/[id]/tournament/**` delegate to the existing service; authorization stays the TOURN-001 `canManageEvent` creator-or-ambassador rule. No new tables, no mirrored bracket state, no provider import outside `providers/`.)
 - ✅ Tournament result reporting, advancement & finalization (TOURN-003 — an authorized competition manager reports a match result with **FOM-neutral input only** (`matchRef` + winning `competition_participants.id` + scores), the provider advances the winner, FOM re-reads the bracket through the existing `GET …/matches`, and the manager **explicitly finalizes** once the provider permits it so the champion is shown. Adds `POST /api/competitions/[id]/tournament/matches/[matchId]/result` and `POST /api/competitions/[id]/tournament/finalize` (thin routes over `reportEventMatchResult` / `finalizeEventTournament`), `toMatchReference` in `lib/integrations/tournament/contract.ts`, and the panel's result form + Finalize button. **Zero local bracket calculation / advancement logic** — the provider remains the source of truth for match state, progression and the winner; draws, re-reporting a settled match and reporting an unready/unmapped match are refused server-side; no provider id, match id or provider term reaches the browser, and **no migration was needed** because no match state is mirrored into Supabase.)
 - ✅ Host/ambassador participant removal + competition-specific ban (T-REM-3 — an authorized creator **or** assigned ambassador can REMOVE a participant (soft removal, nothing deleted; the player may register again later) and/or BAN them from that competition. A ban is a durable, competition-specific `competition_bans` row (`event_id` + `profile_id`, migration `0027`) enforced server-side in `registerForCompetition` **before** any registration is created, so it survives a prior removal and cannot be bypassed by another join link. Banning an actively registered player also removes them — atomically, via the `remove_competition_participant` `SECURITY DEFINER` RPC (`FOR UPDATE` + `ON CONFLICT … DO NOTHING`) using the same lifecycle/provider-safety checks as T-REM-2; an unsafe state is refused with **no** partial result, and a previously removed player remains ban-able. Adds `DELETE /api/competitions/[id]/participants/[participantId]` and `POST …/[participantId]/ban`, the `lib/competition-participant-admin*` helpers, and separate Remove/Ban controls with confirmations and Banned/Removed badges in the operator UI. Re-registration and global bans are out of scope.)
-- ✅ Removed participants excluded from active views & operations (T-REM-4 — the `removed_at IS NULL` rule now filters every **active operational** query: the management list & event statistics, drawing eligibility (`getQualifiedParticipantCount`), challenge state/attempt recording/pass-token minting, check-in by code or QR, and tournament participant sync all exclude soft-removed participants at the query level, so a removed participant can never qualify for a new challenge/drawing or be newly added to an external tournament. History is untouched: the operator list retains removed rows (badged **Removed**, `canAttempt` disabled) so hosts can still ban them, historical public results and the participant's own pass keep their meaning, and tournament bracket/result/finalize resolution still resolves every existing provider mapping. A removed-but-provider-mapped participant (impossible through FOM) is preserved and logged for reconciliation rather than silently mutating provider state. No migration — the `0026` columns are sufficient.)
+- ✅ Removed participants excluded from active views & operations (T-REM-4 — the `removed_at IS NULL` rule now filters every **active operational** query: the management list & event statistics, drawing eligibility (`getQualifiedParticipantCount`), challenge state/attempt recording/pass-token minting, check-in by code or QR, and tournament participant sync all exclude soft-removed participants at the query level, so a removed participant can never qualify for a new challenge/drawing or be newly added to an external tournament. History is untouched: the operator list retains removed rows (badged **Removed**, `canAttempt` disabled) so hosts can still ban them, historical public results and the participant's own pass keep their meaning, and tournament bracket/result/finalize resolution still resolves every existing provider mapping. A removed-but-provider-mapped participant (impossible through FOM) is preserved and logged for reconciliation rather than silently mutating provider state. **Remainder:** the authoritative database-side winner selection is fixed by migration `0029` — `start_competition_drawing` now applies `removed_at IS NULL` to both its eligibility count and its `ORDER BY random() LIMIT 1` selection, keeping the identical signature, permissions, return shape, locking, authorization and `NO_QUALIFIED_PARTICIPANTS` outcome, so drawing eligibility no longer depends on an application pre-check.)
+- ✅ Host/Ambassador reminder email to all participants (T-BULK-1 — an authorized competition **host or assigned ambassador** can email every ACTIVE registered participant of one competition from a new **Email Participants** card on `/competitions/[id]`: compose a subject + plain-text message, see the intended recipient count, preview the server-rendered email, confirm explicitly and see the recorded outcome (eligible / accepted by the provider / failed / still pending). Recipients are resolved **server-side** from `competition_participants` with `removed_at IS NULL` joined to `profiles.email` (never checked-in state, never a client-supplied list), normalized and deduplicated, with missing/invalid addresses skipped and counted. Each participant receives their **own** message — never a shared `To`/`CC` list. Delivery uses a new bounded PostgreSQL outbox (`competition_bulk_emails` + `competition_bulk_email_recipients`, migration `0028`) with `UNIQUE(event_id, request_id)` idempotency, an atomic `claim_next_bulk_email_recipient` RPC (`FOR UPDATE SKIP LOCKED`, service-role only), sequential bounded sends (max 25 per invocation), the shared backoff/attempt cap, per-recipient outcomes (a partially failed batch is never reported or retried as a whole), and a best-effort first attempt via `after()`; the panel drains the remainder safely. Content is validated (subject ≤ 150 chars, no CR/LF; message ≤ 5000 chars) and HTML-escaped into the existing FOM Sports shell, and only verified event details are appended. Adds `GET|POST /api/competitions/[id]/emails`, `POST …/emails/preview`, `GET …/emails/[batchId]` and `POST …/emails/[batchId]/process`, all creator-or-ambassador authorized. No new dependency, no scheduler, no campaigns.)
 
 
 

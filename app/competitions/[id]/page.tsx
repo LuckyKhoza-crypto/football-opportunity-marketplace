@@ -34,11 +34,16 @@ import { AmbassadorManager } from "./AmbassadorManager";
 import { JoinLinkManager } from "./JoinLinkManager";
 import { DrawingPanel } from "./DrawingPanel";
 import { TournamentPanel } from "./TournamentPanel";
+import { EmailParticipantsPanel } from "./EmailParticipantsPanel";
 import { getCompetitionJoinLinks } from "@/lib/competition-join-server";
 import {
   getCompetitionDrawing,
   getQualifiedParticipantCount,
 } from "@/lib/competition-drawing-server";
+import {
+  getCompetitionBulkEmailAudience,
+  listCompetitionBulkEmailBatches,
+} from "@/lib/competition-bulk-email-server";
 
 /**
  * COMP-002 / COMP-004 — Event management page.
@@ -155,6 +160,18 @@ export default async function CompetitionDetailPage({
   // COMP-006 drawing — available to the creator AND assigned ambassadors.
   const qualifiedCount = await getQualifiedParticipantCount(id);
   const drawing = await getCompetitionDrawing(id, session.user.id);
+
+  // T-BULK-1 "Email Participants" — the audience COUNT and the recent send
+  // summaries are resolved server-side (both re-check creator-or-ambassador) so
+  // the panel never needs a recipient list and carries no addresses.
+  const bulkEmailAudience = await getCompetitionBulkEmailAudience(
+    id,
+    session.user.id,
+  );
+  const bulkEmailBatches = await listCompetitionBulkEmailBatches(
+    id,
+    session.user.id,
+  );
 
   const statusColor = COMPETITION_EVENT_STATUS_COLORS[event.status] ?? "";
 
@@ -301,7 +318,7 @@ export default async function CompetitionDetailPage({
             </div>
             {stats.total === 0 && (
               <p className="mt-3 text-sm text-muted-foreground">
-                No participants yet. Share an ambassador's join link or QR
+                No participants yet. Share an ambassador&apos;s join link or QR
                 code below to invite players.
               </p>
             )}
@@ -329,6 +346,26 @@ export default async function CompetitionDetailPage({
               </Link>
             </CardContent>
           </Card>
+
+          {/* T-BULK-1: email every active registered participant of this
+              competition. Available to the creator AND assigned ambassadors;
+              the audience and every send are authorized + resolved
+              server-side. */}
+          <EmailParticipantsPanel
+            eventId={event.id}
+            eventName={event.name}
+            initialAudience={
+              bulkEmailAudience.ok
+                ? bulkEmailAudience.data
+                : {
+                    activeCount: 0,
+                    eligibleCount: 0,
+                    invalidCount: 0,
+                    duplicateCount: 0,
+                  }
+            }
+            initialBatches={bulkEmailBatches.ok ? bulkEmailBatches.data : []}
+          />
 
           {/* COMP-006 drawing: start the draw or show the immutable winner.
               Available to the creator AND assigned ambassadors. */}
