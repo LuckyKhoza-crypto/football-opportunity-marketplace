@@ -398,4 +398,100 @@ describe("COMP-006: getCompetitionDrawing", () => {
     const drawing = await getCompetitionDrawing(EVENT_A, PROFILE_MANAGER);
     expect(drawing).toBeNull();
   });
+
+// ═══════════════════════════════════════════════════════════════
+// T-REM-4 remainder — removed participants are never drawing-eligible
+// ═══════════════════════════════════════════════════════════════
+
+describe("T-REM-4: drawing eligibility for soft-removed participants", () => {
+  it("keeps an active qualified participant eligible (winner is still selected)", async () => {
+    mockManagerAuthorized();
+    mockFromOnce({ data: eventRow(), error: null }); // getCompetitionEvent
+    mockFromOnce({ count: 1, data: null, error: null }); // active qualified count
+    vi.mocked(supabaseAdmin.rpc).mockResolvedValue({
+      data: {
+        success: true,
+        drawing_id: "draw-1",
+        winner_participant_id: "part-active",
+        winner_profile_id: WINNER_PROFILE,
+        qualified_participant_count: 1,
+        drawn_at: "2026-09-21T15:42:00Z",
+      },
+      error: null,
+    } as never);
+    mockFromOnce({ data: { full_name: "Ada Lovelace" }, error: null });
+
+    const result = await startCompetitionDrawing(EVENT_A, PROFILE_MANAGER);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.winnerName).toBe("Ada Lovelace");
+    expect(result.data.qualifiedParticipantCount).toBe(1);
+  });
+
+  it("returns the existing no-eligible outcome when only removed participants qualified", async () => {
+    mockManagerAuthorized();
+    mockFromOnce({ data: eventRow(), error: null });
+    mockFromOnce({ count: 2, data: null, error: null }); // stale app-side count
+    // The database is authoritative: with only removed qualified participants it
+    // reports NO_QUALIFIED_PARTICIPANTS and writes no drawing.
+    vi.mocked(supabaseAdmin.rpc).mockResolvedValue({
+      data: { success: false, error: "NO_QUALIFIED_PARTICIPANTS" },
+      error: null,
+    } as never);
+
+    const result = await startCompetitionDrawing(EVENT_A, PROFILE_MANAGER);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(409);
+      expect(result.error).toMatch(/no qualified participants/i);
+    }
+  });
+
+  it("asks for the active qualified count only (removed_at IS NULL)", async () => {
+    mockManagerAuthorized();
+    mockFromOnce({ data: eventRow(), error: null });
+    const countBuilder = mockFromOnce({ count: 0, data: null, error: null });
+
+    await startCompetitionDrawing(EVENT_A, PROFILE_MANAGER);
+
+    // The T-REM-4 rule is applied in the query, not only by the RPC.
+    expect(countBuilder.is).toHaveBeenCalledWith("removed_at", null);
+    expect(countBuilder.eq).toHaveBeenCalledWith("event_id", EVENT_A);
+    expect(countBuilder.eq).toHaveBeenCalledWith("status", "qualified");
+  });
+
+  it("never lets the caller name a winner (the DB selects it)", async () => {
+    mockManagerAuthorized();
+    mockFromOnce({ data: eventRow(), error: null });
+    mockFromOnce({ count: 1, data: null, error: null });
+    vi.mocked(supabaseAdmin.rpc).mockResolvedValue({
+      data: {
+        success: true,
+        winner_participant_id: "part-active",
+        winner_profile_id: WINNER_PROFILE,
+        qualified_participant_count: 1,
+        drawn_at: "2026-09-21T15:42:00Z",
+      },
+      error: null,
+    } as never);
+    mockFromOnce({ data: { full_name: "Ada Lovelace" }, error: null });
+
+    await startCompetitionDrawing(EVENT_A, PROFILE_MANAGER);
+
+    const [rpcName, rpcArgs] = vi.mocked(supabaseAdmin.rpc).mock.calls[0];
+    expect(rpcName).toBe("start_competition_drawing");
+    expect(rpcArgs).toEqual({
+      p_event_id: EVENT_A,
+      p_user_id: PROFILE_MANAGER,
+    });
+    // No participant id, winner id or count is ever supplied by the app.
+    expect(Object.keys(rpcArgs as Record<string, unknown>).sort()).toEqual([
+      "p_event_id",
+      "p_user_id",
+    ]);
+  });
+});
+
 });
