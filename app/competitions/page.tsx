@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
-import { Plus, Trophy } from "lucide-react";
+import { Plus, Mail, Trophy } from "lucide-react";
 import {
   isCompetitionCreationAdmin,
   listAmbassadorCompetitionEvents,
@@ -55,12 +55,23 @@ export default async function CompetitionsPage() {
             </p>
           </div>
           {canCreate && (
-            <Link href="/competitions/new">
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                Create Competition
-              </Button>
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/competitions/new">
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Create Competition
+                </Button>
+              </Link>
+              {/* FOM-EMAIL-ANNOUNCEMENTS-001: the "Email Users" admin feature is
+                  shown only to the configured administrator. The page itself is
+                  server-guarded (a direct visit by anyone else returns a 404). */}
+              <Link href="/admin/email-announcements">
+                <Button variant="outline">
+                  <Mail className="mr-2 h-4 w-4" />
+                  Email Users
+                </Button>
+              </Link>
+            </div>
           )}
         </div>
 
