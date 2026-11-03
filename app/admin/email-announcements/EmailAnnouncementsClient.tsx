@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -151,54 +151,97 @@ export function EmailAnnouncementsClient({
     promotionCompetitionId === NONE ? "" : promotionCompetitionId;
 
   /**
-   * Resolve the recipient count for the CURRENT selection. Never sends and never
-   * stores anything — this is only a count.
+   * Resolve the recipient count for a given selection. Never sends and never
+   * stores anything — this is only a count, and it runs only when the
+   * administrator changes the selection (never automatically on a send).
    */
-  const loadAudience = useCallback(async () => {
-    if (audienceType === "previous_competition" && !previousSelected) {
-      setAudience({
-        audienceType,
-        baseCount: 0,
-        eligibleCount: 0,
-        invalidCount: 0,
-        duplicateCount: 0,
-        excludedRegisteredCount: 0,
-        promotionEventId: promotionSelected || null,
-      });
-      setAudienceError(null);
-      return;
-    }
+  const refreshAudience = useCallback(
+    async (selection: {
+      audienceType: EmailAnnouncementAudienceType;
+      previousCompetitionId: string;
+      promotionCompetitionId: string;
+    }) => {
+      const previous =
+        selection.previousCompetitionId === NONE
+          ? ""
+          : selection.previousCompetitionId;
+      const promotion =
+        selection.promotionCompetitionId === NONE
+          ? ""
+          : selection.promotionCompetitionId;
 
-    setAudienceLoading(true);
-    setAudienceError(null);
-    try {
-      const res = await fetch("/api/admin/email-announcements/audience", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          audienceType,
-          previousCompetitionId: previousSelected,
-          promotionCompetitionId: promotionSelected,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to resolve the recipient count");
+      if (selection.audienceType === "previous_competition" && !previous) {
+        setAudience({
+          audienceType: selection.audienceType,
+          baseCount: 0,
+          eligibleCount: 0,
+          invalidCount: 0,
+          duplicateCount: 0,
+          excludedRegisteredCount: 0,
+          promotionEventId: promotion || null,
+        });
+        setAudienceError(null);
+        return;
       }
-      setAudience(data.audience as EmailAnnouncementAudienceSummary);
-    } catch (err) {
-      setAudienceError(
-        err instanceof Error ? err.message : "Something went wrong",
-      );
-    } finally {
-      setAudienceLoading(false);
-    }
-  }, [audienceType, previousSelected, promotionSelected]);
 
-  // Re-count whenever the audience selection changes. Counting only — no send.
-  useEffect(() => {
-    void loadAudience();
-  }, [loadAudience]);
+      setAudienceLoading(true);
+      setAudienceError(null);
+      try {
+        const res = await fetch("/api/admin/email-announcements/audience", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            audienceType: selection.audienceType,
+            previousCompetitionId: previous,
+            promotionCompetitionId: promotion,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(
+            data.error || "Failed to resolve the recipient count",
+          );
+        }
+        setAudience(data.audience as EmailAnnouncementAudienceSummary);
+      } catch (err) {
+        setAudienceError(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      } finally {
+        setAudienceLoading(false);
+      }
+    },
+    [],
+  );
+
+  const handleAudienceTypeChange = (value: string) => {
+    const next = value as EmailAnnouncementAudienceType;
+    setAudienceType(next);
+    void refreshAudience({
+      audienceType: next,
+      previousCompetitionId,
+      promotionCompetitionId,
+    });
+  };
+
+  const handlePreviousCompetitionChange = (value: string) => {
+    setPreviousCompetitionId(value);
+    void refreshAudience({
+      audienceType,
+      previousCompetitionId: value,
+      promotionCompetitionId,
+    });
+  };
+
+  const handlePromotionChange = (value: string) => {
+    setPromotionCompetitionId(value);
+    void refreshAudience({
+      audienceType,
+      previousCompetitionId,
+      promotionCompetitionId: value,
+    });
+  };
+
 
   /** Insert the image placeholder at the cursor (or append it). */
   const insertImageToken = useCallback(() => {
@@ -411,9 +454,7 @@ export function EmailAnnouncementsClient({
               <Label htmlFor="announcement-audience">Send to</Label>
               <Select
                 value={audienceType}
-                onValueChange={(value) =>
-                  setAudienceType(value as EmailAnnouncementAudienceType)
-                }
+                onValueChange={handleAudienceTypeChange}
                 disabled={sending}
               >
                 <SelectTrigger id="announcement-audience">
@@ -437,7 +478,7 @@ export function EmailAnnouncementsClient({
                 </Label>
                 <Select
                   value={previousCompetitionId}
-                  onValueChange={setPreviousCompetitionId}
+                  onValueChange={handlePreviousCompetitionChange}
                   disabled={sending}
                 >
                   <SelectTrigger id="announcement-previous">
@@ -466,7 +507,7 @@ export function EmailAnnouncementsClient({
               </Label>
               <Select
                 value={promotionCompetitionId}
-                onValueChange={setPromotionCompetitionId}
+                onValueChange={handlePromotionChange}
                 disabled={sending}
               >
                 <SelectTrigger id="announcement-promote">
