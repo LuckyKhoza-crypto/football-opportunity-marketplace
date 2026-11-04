@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -106,6 +106,7 @@ vi.mock("@/lib/competition-server", () => ({
 import { resolvePromotionJoinLink } from "@/lib/email-announcements-join-link";
 import { getCompetitionEvent } from "@/lib/competition-server";
 import { hashJoinToken } from "@/lib/competition-join";
+import { resolvePublicAppOrigin } from "@/lib/competition-public-origin";
 
 /**
  * FOM-EMAIL-ANNOUNCEMENTS-001 — hybrid promotion registration-link tests.
@@ -328,6 +329,73 @@ describe("FOM-EMAIL-ANNOUNCEMENTS-001: promotion join link", () => {
     expect(result.data.url).toBe(winnerUrl);
     expect(result.data.joinLinkId).toBe(LINK_WINNER);
     expect(h.deletes).toEqual([{ table: JOIN_LINKS, eq: ["id", LINK_ONE] }]);
+  });
+});
+
+
+describe("FOM-EMAIL-ANNOUNCEMENTS-001: public origin safety (no localhost links)", () => {
+  const prevAppUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const prevNextUrl = process.env.NEXTAUTH_URL;
+
+  afterEach(() => {
+    if (prevAppUrl === undefined) delete process.env.NEXT_PUBLIC_APP_URL;
+    else process.env.NEXT_PUBLIC_APP_URL = prevAppUrl;
+    if (prevNextUrl === undefined) delete process.env.NEXTAUTH_URL;
+    else process.env.NEXTAUTH_URL = prevNextUrl;
+  });
+
+  it("resolves the configured public origin instead of a localhost request origin", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://www.fom-sports.com";
+    delete process.env.NEXTAUTH_URL;
+    expect(resolvePublicAppOrigin("http://localhost:3000")).toBe(
+      "https://www.fom-sports.com",
+    );
+  });
+
+  it("refuses to build a link from a loopback origin when no public URL is configured", async () => {
+    delete process.env.NEXT_PUBLIC_APP_URL;
+    delete process.env.NEXTAUTH_URL;
+
+    const result = await resolvePromotionJoinLink(
+      EVENT,
+      ADMIN,
+      "http://localhost:3000",
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(409);
+      expect(result.error).toMatch(/public URL is not configured/i);
+    }
+    // Nothing is created and nothing is cached.
+    expect(h.inserts).toHaveLength(0);
+    expect(h.upserts).toHaveLength(0);
+  });
+
+  it("still allows an explicitly configured localhost URL (local dev)", async () => {
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+    vi.mocked(getCompetitionEvent).mockResolvedValue({
+      id: EVENT,
+      name: "Spring Cup",
+      status: "active",
+    } as never);
+
+    queueSelect(CACHE, { data: null, error: null });
+    queueSelect(AMBASSADORS, { data: { id: AMBASSADOR }, error: null });
+    h.insertResults[JOIN_LINKS] = { data: { id: LINK_ONE }, error: null };
+
+    const result = await resolvePromotionJoinLink(
+      EVENT,
+      ADMIN,
+      "http://localhost:3000",
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.data.url).toMatch(
+        /^http:\/\/localhost:3000\/competitions\/join\//,
+      );
+    }
   });
 });
 

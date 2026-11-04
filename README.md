@@ -1991,6 +1991,14 @@ routes/contracts, tables, delivery/retry logic and authorization are untouched.
   Because the raw token is never persisted on `competition_join_links` by design, an
   active link created outside this feature cannot be re-read; reuse therefore applies to
   the link this feature resolved and cached.
+- **Link origin (important):** the absolute URL is built from the **canonical public
+  origin** via the same `resolvePublicAppOrigin` helper the participant-QR flow uses
+  (`NEXT_PUBLIC_APP_URL` → `NEXTAUTH_URL` → request origin) — never from the raw request
+  origin, because behind a proxy/container the request can report `http://localhost:3000`.
+  As a safety net, a loopback origin is **refused with a clear `409`** (instead of emailing
+  an unopenable link) when no canonical public URL is configured. Because the resolved URL
+  is cached per competition, changing `NEXT_PUBLIC_APP_URL` requires deleting the cached
+  row (`email_announcement_promotion_links`) so the next preview/send regenerates it.
 - **Formatting preservation (critical requirement):** the editor is a plain-text composer
   whose structure is converted to safe HTML by `renderAnnouncementBodyHtml`
   (`lib/email-announcements.ts`):
@@ -2203,7 +2211,7 @@ Team reviews application → PATCH /api/applications/[id] { status: "accepted" }
 | `GOOGLE_CLIENT_SECRET` | `lib/auth.ts` | Google OAuth |
 | `NEXTAUTH_SECRET` | `lib/auth.ts` | JWT signing |
 | `NEXTAUTH_URL` | NextAuth | Production URL |
-| `NEXT_PUBLIC_APP_URL` | `lib/competition-attempt-api.ts` | Canonical **public** app URL (e.g. `https://www.fom-sports.com`). Used to build participant QR payloads (on-screen pass + confirmation email) so the emailed **hosted** QR image is reachable by mail image proxies (Gmail `meips`). Falls back to `NEXTAUTH_URL`, then the request origin. Not a secret. |
+| `NEXT_PUBLIC_APP_URL` | `lib/competition-attempt-api.ts`, `lib/email-announcements-api.ts` | Canonical **public** app URL (e.g. `https://www.fom-sports.com`). Used to build participant QR payloads (on-screen pass + confirmation email) so the emailed **hosted** QR image is reachable by mail image proxies (Gmail `meips`), **and** to build the FOM-EMAIL-ANNOUNCEMENTS-001 promoted-competition registration link. Falls back to `NEXTAUTH_URL`, then the request origin. **Set this in production** — behind a proxy/container the request origin can be `http://localhost:3000`, which must never reach a recipient; the promotion link is refused with a clear error when no canonical URL is configured and the origin is loopback. Not a secret. |
 | `REALTIME_CHANNEL_SECRET` | `lib/realtime-broadcast.ts` | HMAC signing for realtime channels |
 | `MULTI_TEAM_ADMIN_USER_ID` | `lib/multi-team.ts`, `lib/competition-server.ts` | profiles.id of the multi-team admin (server-only). COMP-007 reuses it as the **only** user allowed to create competitions, and FOM-EMAIL-ANNOUNCEMENTS-001 reuses the same capability as the **only** user allowed to use the admin "Email Users" feature (page + every `/api/admin/email-announcements` route). Server-only, never `NEXT_PUBLIC_`, fails closed when unset. |
 | `BREVO_API_KEY` | `lib/email/config.ts`, `lib/email/providers/brevo.ts` | **Secret** — server only (EMAIL-001). Authenticates the Brevo v3 transactional email API. Never `NEXT_PUBLIC_`, never logged. |
