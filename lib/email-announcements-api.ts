@@ -24,6 +24,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { resolvePublicAppOrigin } from "@/lib/competition-public-origin";
 import {
   getAnnouncementAudience,
   isAnnouncementsAdmin,
@@ -45,13 +46,26 @@ async function requireProfileId(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
-/** The trusted request origin used to build absolute registration links. */
-function requestOrigin(request: Request): string {
+/**
+ * The PUBLIC origin used to build absolute registration links.
+ *
+ * Resolved through the SAME helper the participant-QR flow uses
+ * (`resolvePublicAppOrigin`): `NEXT_PUBLIC_APP_URL` → `NEXTAUTH_URL` → the
+ * request origin.
+ *
+ * This is essential: behind a proxy/container (Vercel, Docker, Nginx) a request
+ * can report its own origin as `http://localhost:3000`, and that must NEVER be
+ * baked into an emailed registration link — the recipient could not open it.
+ * `NEXT_PUBLIC_APP_URL` (or `NEXTAUTH_URL`) overrides whatever the request says.
+ */
+function publicOrigin(request: Request): string {
+  let requestOrigin = "";
   try {
-    return new URL(request.url).origin;
+    requestOrigin = new URL(request.url).origin;
   } catch {
-    return "";
+    requestOrigin = "";
   }
+  return resolvePublicAppOrigin(requestOrigin);
 }
 
 /**
@@ -194,7 +208,7 @@ export async function previewAnnouncementHandler(
       previousCompetitionId: body.previousCompetitionId,
       promotionCompetitionId: body.promotionCompetitionId,
       imageUrl: body.imageUrl,
-      origin: requestOrigin(request),
+      origin: publicOrigin(request),
     });
     if (!result.ok) {
       return NextResponse.json(
@@ -247,7 +261,7 @@ export async function sendAnnouncementHandler(
       promotionCompetitionId: body.promotionCompetitionId,
       imageUrl: body.imageUrl,
       requestId: body.requestId,
-      origin: requestOrigin(request),
+      origin: publicOrigin(request),
     });
     if (!result.ok) {
       return NextResponse.json(

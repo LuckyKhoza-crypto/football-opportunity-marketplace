@@ -82,6 +82,34 @@ function isCachedLinkUsable(row: CachedLinkRow | null): row is CachedLinkRow {
 }
 
 /**
+ * A loopback/unspecified origin can never be opened by an email recipient, so it
+ * must never be baked into a registration link.
+ */
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const { hostname } = new URL(origin);
+    return (
+      hostname === "localhost" ||
+      hostname.endsWith(".localhost") ||
+      hostname === "127.0.0.1" ||
+      hostname === "0.0.0.0" ||
+      hostname === "::1" ||
+      hostname === "[::1]"
+    );
+  } catch {
+    return true;
+  }
+}
+
+/** Whether a canonical public app URL is explicitly configured. */
+function hasConfiguredPublicUrl(): boolean {
+  return Boolean(
+    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+      process.env.NEXTAUTH_URL?.trim(),
+  );
+}
+
+/**
  * Create a new reusable join link for the promoted competition, owned by an
  * ambassador of that competition (the existing `competition_join_links`
  * `ambassador_id` requirement).
@@ -191,6 +219,19 @@ export async function resolvePromotionJoinLink(
       ok: false,
       error: "Not authorized to generate registration links",
       status: 403,
+    };
+  }
+
+  // Refuse to bake an unreachable origin into an email. When a canonical public
+  // URL is configured (NEXT_PUBLIC_APP_URL / NEXTAUTH_URL) the caller already
+  // resolved it, so this only triggers on a bare loopback fallback — where
+  // emailing the link would be worse than a clear, actionable error.
+  if (isLoopbackOrigin(origin) && !hasConfiguredPublicUrl()) {
+    return {
+      ok: false,
+      status: 409,
+      error:
+        "The app's public URL is not configured, so a working registration link cannot be generated. Set NEXT_PUBLIC_APP_URL to the public app URL and try again.",
     };
   }
 
