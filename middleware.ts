@@ -98,6 +98,10 @@ export default withAuth(
           "/notifications",
           "/opportunities",
           "/competitions",
+          // FOM-EMAIL-ANNOUNCEMENTS-001: the admin "Email Users" page requires
+          // authentication. The page itself (and every API route) additionally
+          // enforces the administrator capability server-side.
+          "/admin",
         ];
 
         const isProtectedRoute = protectedRoutes.some((route) =>
@@ -131,5 +135,6 @@ export const config = {
     "/messages/:path*",
     "/notifications/:path*",
     "/competitions/:path*",
+    "/admin/:path*",
   ],
 };
